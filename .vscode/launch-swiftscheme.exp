@@ -1,0 +1,11 @@
+#!/usr/bin/expect -f
+set timeout -1
+set lab [file normalize [file dirname [file dirname [info script]]]]
+cd $lab
+spawn -noecho env KIMI_CODE_HOME=$lab/.kimi-home /Users/krystian/.kimi-code/bin/kimi -y -m codex/gpt-5.6-sol
+sleep 8
+send -- "Read TASK.md and implement SwiftScheme now. Work autonomously until swift test and a CLI smoke test pass. Do not spawn agents or workers."
+send -- "\r"
+after 500
+send -- "\n"
+interact

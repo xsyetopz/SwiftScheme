@@ -6,6 +6,6 @@ Constraints:
 - Use the local `Reference/r5rs.pdf` as the normative source.
 - Swift 6.3.3, no third-party dependencies.
 - Compact code is desired, but it must compile and have meaningful behavioral tests.
-- Never use Agent, AgentSwarm, subagents, or background agents.
+- Agent, AgentSwarm, subagents, and background agents are allowed when useful.
 - Work autonomously through implementation, `swift test`, and a CLI smoke test.
 - Do not stop at a plan. Create the code and validate it.
