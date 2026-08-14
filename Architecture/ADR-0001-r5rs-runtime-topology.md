@@ -22,7 +22,7 @@ architecture decision and review responsibility.
 ## Evidence
 
 The current snapshot below is anchored to final architecture candidate
-`b68eb1c` (syntax-aware no-native-UI import gate, descended from predecessor
+`9f954c6` (syntax-aware no-native-UI import gate, descended from predecessor
 `22b9a62` and semantic checkpoint `e89c237`) on 2026-08-14. Historical
 observations are explicitly labeled and are retained only to explain the
 migration; they are not current package evidence.
@@ -38,7 +38,7 @@ migration; they are not current package evidence.
   canonical package graph. The library target path was `Sources/swiftscheme`;
   the CLI was `Sources/SwiftSchemeCLI`; package tests were wired through
   `Plugins/SwiftSchemeTestPlugin` and a local `Sources/XCTest` target.
-- **Current (`b68eb1c`):** `Sources/swiftscheme/SwiftScheme.swift` is a
+- **Current (`9f954c6`):** `Sources/swiftscheme/SwiftScheme.swift` is a
   4,293-line implementation that
   currently owns the reader (`Reader`), writer (`Writer`), syntax-rules expander
   (`SyntaxRules`), object model (`Pair`, `SchemeString`, `SchemeVector`,
@@ -84,7 +84,7 @@ migration; they are not current package evidence.
   invariants, external conformance observations, and lifetime risks. They are
   useful evidence but are not architecture enforcement.
 
-**Current post-migration evidence at `b68eb1c` (2026-08-14):** `Package.swift` now declares
+**Current post-migration evidence at `9f954c6` (2026-08-14):** `Package.swift` now declares
 one `SwiftScheme` library product, the `swiftscheme` CLI executable, and one
 `SwiftSchemeTests` SwiftPM test target at `Tests/SwiftSchemeTests`. A fresh
 `swift package dump-package` reports only `SwiftScheme`, `SwiftSchemeCLI`, and
@@ -113,7 +113,7 @@ and visible framework/artifact
 exemptions. These findings are recorded for the enforce handoff; this ADR does
 not suppress or waive any of them.
 
-**Current candidate validation at `b68eb1c` (2026-08-14):** with the Xcode 26.6 Swift 6.3.3
+**Current candidate validation at `9f954c6` (2026-08-14):** with the Xcode 26.6 Swift 6.3.3
 toolchain (the provider that ships the Swift Testing module), a fresh-scratch
 `swift test` passed 8 suites/68 tests, and a fresh-scratch `swift build` passed.
 `swift run swiftscheme Tests/Fixtures/smoke.scm` produced `sum=30`. The stock
