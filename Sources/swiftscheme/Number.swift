@@ -29,7 +29,22 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
   public var isZero: Bool { numerator.isZero }
   public var signum: Int { numerator.signum }
   public var absoluteValue: Rational { Rational(numerator.absoluteValue, denominator)! }
-  public var doubleValue: Double { numerator.doubleValue / denominator.doubleValue }
+  public var doubleValue: Double {
+    guard !numerator.isZero else { return 0 }
+    let numeratorApproximation = numerator.absoluteValue.binaryApproximation
+    let denominatorApproximation = denominator.binaryApproximation
+    var significand = numeratorApproximation.significand / denominatorApproximation.significand
+    var exponent = numeratorApproximation.exponent - denominatorApproximation.exponent
+    if significand >= 2 {
+      significand /= 2
+      exponent += 1
+    } else if significand < 1 {
+      significand *= 2
+      exponent -= 1
+    }
+    let value = Foundation.scalbn(significand, Int32(clamping: exponent))
+    return numerator.signum < 0 ? -value : value
+  }
   public var description: String {
     isInteger ? numerator.description : "\(numerator)/\(denominator)"
   }

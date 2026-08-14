@@ -180,6 +180,25 @@ import Testing
     #expect(result.written == "((#t #t) (#t #t) (#t #t) (#t #t))")
   }
 
+  @Test("finite inexact radix output preserves binary64 boundaries") @MainActor
+  func numberStringFiniteInexactBoundaryRoundTrips() throws {
+    let result = try r5rsEvaluate(
+      """
+      (let ((roundtrip (lambda (value radix)
+                         (let ((text (number->string value radix)))
+                           (list (eqv? value (string->number text radix))
+                                 (inexact? (string->number text radix)))))))
+        (list (roundtrip 5e-324 2)
+              (roundtrip -5e-324 8)
+              (roundtrip 5e-324 16)
+              (roundtrip 2.2250738585072014e-308 2)
+              (roundtrip 1.7976931348623157e308 8)
+              (roundtrip -1.7976931348623157e308 16)))
+      """
+    )
+    #expect(result.written == "((#t #t) (#t #t) (#t #t) (#t #t) (#t #t) (#t #t))")
+  }
+
   @Test("signed-zero branch cuts stay inside the R5RS angle range") @MainActor
   func signedZeroBranchCuts() throws {
     let result = try r5rsEvaluate(

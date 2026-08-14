@@ -1,3 +1,5 @@
+import Foundation
+
 public enum BigIntError: Error, Equatable {
   case divisionByZero
   case negativeExponent
@@ -105,6 +107,39 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     var value = 0.0
     for word in words.reversed() { value = value * 4_294_967_296.0 + Double(word) }
     return sign < 0 ? -value : value
+  }
+
+  /// Returns a bounded leading-bit approximation and its base-2 exponent.
+  ///
+  /// The approximation is intentionally kept internal: callers that need a
+  /// `Double` for an arbitrary-size integer can scale the bounded significand
+  /// without first overflowing the integer into infinity.
+  var binaryApproximation: (significand: Double, exponent: Int) {
+    guard !isZero, let topWord = words.last else { return (0, 0) }
+    let topWordBits = 32 - topWord.leadingZeroBitCount
+    let bitWidth = (words.count - 1) * 32 + topWordBits
+    let requestedBits = min(bitWidth, 53)
+    var remaining = requestedBits
+    var wordIndex = words.count - 1
+    var availableBits = topWordBits
+    var leading: UInt64 = 0
+
+    while remaining > 0 {
+      let taken = min(remaining, availableBits)
+      let shift = availableBits - taken
+      let mask = taken == 64 ? UInt64.max : (UInt64(1) << UInt64(taken)) - 1
+      let chunk = (UInt64(words[wordIndex]) >> UInt64(shift)) & mask
+      leading = (leading << UInt64(taken)) | chunk
+      remaining -= taken
+      if remaining > 0 {
+        wordIndex -= 1
+        availableBits = 32
+      }
+    }
+
+    let scale = Foundation.scalbn(1.0, Int32(requestedBits - 1))
+    let signed = Double(leading) / scale
+    return (sign < 0 ? -signed : signed, bitWidth - 1)
   }
 
   private var unsignedMagnitude: UInt64? {
