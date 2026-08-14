@@ -182,6 +182,16 @@ struct R5RSIODataTests {
     )
   }
 
+  @Test("omitted input ports reject a closed current input port")
+  func closedCurrentInputDefaults() {
+    for operation in ["read", "read-char", "peek-char", "char-ready?"] {
+      expectIOError(
+        "(let ((p (current-input-port))) (close-input-port p) (\(operation)))",
+        "closed current input for \(operation)"
+      )
+    }
+  }
+
   @Test("output ports distinguish write, display, and character output")
   func outputPortMatrix() throws {
     let source = """
@@ -194,6 +204,46 @@ struct R5RSIODataTests {
     """
     let result = try evaluateIO(source)
     #expect(result.written == "\"\\\"a\n\\\"b\n!\n\"")
+  }
+
+  @Test("omitted output ports reject a closed current output port")
+  func closedCurrentOutputDefaults() {
+    let operations = [
+      ("(write 'still-writes)", "write"),
+      ("(display 'still-displays)", "display"),
+      ("(newline)", "newline"),
+      ("(write-char #\\!)", "write-char")
+    ]
+    for (operation, name) in operations {
+      expectIOError(
+        "(let ((p (current-output-port))) (close-output-port p) \(operation))",
+        "closed current output for \(name)"
+      )
+    }
+  }
+
+  @Test("closed explicit ports retain mode predicates and remain invalid for I/O")
+  func closedExplicitPortContracts() throws {
+    let result = try evaluateIO(
+      """
+      (let ((input (open-input-string "x")) (output (open-output-string)))
+        (close-input-port input)
+        (close-input-port input)
+        (close-output-port output)
+        (close-output-port output)
+        (list (port? input) (input-port? input) (output-port? input)
+              (port? output) (input-port? output) (output-port? output)))
+      """
+    )
+    #expect(result.written == "(#t #t #f #t #f #t)")
+    expectIOError(
+      "(let ((p (open-input-string \"x\"))) (close-input-port p) (read-char p))",
+      "explicit closed input port"
+    )
+    expectIOError(
+      "(let ((p (open-output-string))) (close-output-port p) (write 'x p))",
+      "explicit closed output port"
+    )
   }
 
   @Test("vectors preserve mutation and list conversion contracts")

@@ -3783,7 +3783,9 @@ public final class Interpreter {
       guard args.count == 1 || args.count == 2 else {
         throw SchemeError.arity("write-char expects 1 or 2 arguments")
       }
-      let destination = args.count == 2 ? try port(args[1], .output, "write-char") : currentOutput
+      let destination = args.count == 2
+        ? try port(args[1], .output, "write-char")
+        : try openPort(currentOutput, .output, "write-char")
       try emit(String(try character(args[0], "write-char")), to: destination)
       return .unspecified
     }
@@ -4189,22 +4191,31 @@ private func charPredicate(_ args: [Value], _ name: String, _ test: (Character) 
   return .boolean(test(try character(args[0], name)))
 }
 
-private func port(_ value: Value, _ mode: SchemePort.Mode, _ context: String) throws -> SchemePort {
-  guard case .port(let port) = value, port.mode == mode, !port.closed else {
+private func openPort(
+  _ port: SchemePort, _ mode: SchemePort.Mode, _ context: String
+) throws -> SchemePort {
+  guard port.mode == mode, !port.closed else {
     throw SchemeError.type("\(context) expects an open \(mode == .input ? "input" : "output") port")
   }
   return port
 }
+
+private func port(_ value: Value, _ mode: SchemePort.Mode, _ context: String) throws -> SchemePort {
+  guard case .port(let port) = value else {
+    throw SchemeError.type("\(context) expects an open \(mode == .input ? "input" : "output") port")
+  }
+  return try openPort(port, mode, context)
+}
 private func inputPort(_ args: [Value], _ fallback: SchemePort, _ name: String) throws -> SchemePort
 {
   guard args.count <= 1 else { throw SchemeError.arity("\(name) expects 0 or 1 arguments") }
-  return args.isEmpty ? fallback : try port(args[0], .input, name)
+  return args.isEmpty ? try openPort(fallback, .input, name) : try port(args[0], .input, name)
 }
 private func outputPort(_ args: [Value], _ fallback: SchemePort, _ name: String) throws
   -> SchemePort
 {
   guard args.count <= 1 else { throw SchemeError.arity("\(name) expects 0 or 1 arguments") }
-  return args.isEmpty ? fallback : try port(args[0], .output, name)
+  return args.isEmpty ? try openPort(fallback, .output, name) : try port(args[0], .output, name)
 }
 private func outputArguments(_ args: [Value], _ fallback: SchemePort, _ name: String) throws -> (
   Value, SchemePort
@@ -4212,7 +4223,10 @@ private func outputArguments(_ args: [Value], _ fallback: SchemePort, _ name: St
   guard args.count == 1 || args.count == 2 else {
     throw SchemeError.arity("\(name) expects 1 or 2 arguments")
   }
-  return (args[0], args.count == 2 ? try port(args[1], .output, name) : fallback)
+  return (
+    args[0],
+    args.count == 2 ? try port(args[1], .output, name) : try openPort(fallback, .output, name)
+  )
 }
 private func emit(_ text: String, to port: SchemePort) throws {
   if let sink = port.sink { try sink(text) } else { port.output += text }
