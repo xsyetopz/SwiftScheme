@@ -3318,8 +3318,11 @@ public final class Interpreter {
     }
     primitive("list-tail", in: env) { args in
       try require(args, 2, "list-tail")
+      let count = try array(from: args[0], context: "list-tail").count
+      let offset = try index(args[1], "list-tail")
+      guard offset <= count else { throw SchemeError.numeric("index out of range") }
       var value = args[0]
-      for _ in 0..<(try index(args[1], "list-tail")) { value = try pair(value, "list-tail").cdr }
+      for _ in 0..<offset { value = try pair(value, "list-tail").cdr }
       return value
     }
     primitive("list-ref", in: env) { args in
@@ -3363,11 +3366,13 @@ public final class Interpreter {
     for name in ["memq", "memv", "member"] {
       primitive(name, in: env) { args in
         try require(args, 2, name)
+        let values = try array(from: args[1], context: name)
         var cursor = args[1]
-        while case .pair(let p) = cursor {
+        for value in values {
+          let p = try pair(cursor, name)
           let found =
-            name == "memq"
-            ? eq(args[0], p.car) : name == "memv" ? eqv(args[0], p.car) : equal(args[0], p.car)
+            name == "memq" ? eq(args[0], value)
+            : name == "memv" ? eqv(args[0], value) : equal(args[0], value)
           if found { return cursor }
           cursor = p.cdr
         }
@@ -3576,7 +3581,7 @@ public final class Interpreter {
           throw SchemeError.arity("\(name) expects at least 2 arguments")
         }
         var strings = try args.map { try schemeString($0, name).string }
-        if name.contains("-ci") { strings = strings.map { $0.lowercased() } }
+        if name.contains("-ci") { strings = strings.map(scalarCaseStringKey) }
         return .boolean(zip(strings, strings.dropFirst()).allSatisfy { compare($0, $1, name) })
       }
     }
@@ -4130,6 +4135,10 @@ private func scalarCaseKey(_ character: Character) -> String {
     }
   }
   return keys.min() ?? String(character)
+}
+
+private func scalarCaseStringKey(_ string: String) -> String {
+  string.map(scalarCaseKey).joined()
 }
 
 private func charPredicate(_ args: [Value], _ name: String, _ test: (Character) -> Bool) throws

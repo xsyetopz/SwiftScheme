@@ -82,6 +82,42 @@ struct R5RSIODataTests {
     #expect(result.written == "#t")
   }
 
+  @Test("string-ci predicates extend char-ci character classes")
+  func stringCaseOrderingUsesCharacterKeys() throws {
+    let result = try evaluateIO(
+      "(list (char-ci=? #\\ſ #\\S) (string-ci=? \"ſ\" \"S\") "
+        + "(char-ci=? #\\ẞ #\\ß) (string-ci=? \"ẞ\" \"ß\") "
+        + "(string-ci<? \"ſa\" \"Sa\") (string-ci>=? \"ẞ\" \"ß\"))"
+    )
+    #expect(result.written == "(#t #t #t #t #f #t)")
+  }
+
+  @Test("list consumers reject non-list and improper list arguments")
+  func listArgumentDomains() {
+    expectIOError("(list-tail 1 0)", "list-tail scalar domain")
+    expectIOError("(list-tail '(a . b) 0)", "list-tail improper domain")
+    expectIOError("(list-tail '(a) 2)", "list-tail bounds")
+    expectIOError("(memq 'a 1)", "memq scalar domain")
+    expectIOError("(memq 'z '(a . b))", "memq improper domain")
+    expectIOError(
+      "(let ((x (cons 'a '()))) (set-cdr! x x) (memq 'z x))",
+      "memq cyclic domain"
+    )
+    expectIOError("(memv 'a 1)", "memv scalar domain")
+    expectIOError("(memv 'z '(a . b))", "memv improper domain")
+    expectIOError("(member 'a 1)", "member scalar domain")
+    expectIOError("(member 'z '(a . b))", "member improper domain")
+  }
+
+  @Test("list-tail and membership preserve valid list results")
+  func validListConsumers() throws {
+    let result = try evaluateIO(
+      "(list (list-tail '(a b c) 0) (list-tail '(a b c) 2) "
+        + "(memq 'b '(a b c)) (memv 2 '(1 2 3)) (member '(b) '((a) (b))))"
+    )
+    #expect(result.written == "((a b c) (c) (b c) (2 3) ((b)))")
+  }
+
   @Test("read-created pairs, strings, and vectors remain mutable")
   func readValuesAreMutable() throws {
     #expect(
