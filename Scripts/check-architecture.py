@@ -46,8 +46,18 @@ FORBIDDEN_TEXT = (
     re.compile(r"(?:^|[\\/])Plugins(?:[\\/]|$)"),
     re.compile(r"(?:^|[\\/])Sources[\\/]XCTest(?:[\\/]|$)"),
 )
+# Swift permits declaration attributes before imports and an import-kind before
+# a module member (for example ``@preconcurrency import SwiftUI`` or
+# ``import struct SwiftUI.Text``). Keep the match anchored to a declaration
+# line and require the complete module root so identifiers such as
+# ``SwiftUICompatibility`` are not false positives.
 NATIVE_UI_IMPORT = re.compile(
-    r"^\s*import\s+(?:SwiftUI|UIKit|AppKit|WatchKit|TVMLKit|RealityKit|SceneKit|SpriteKit)\b",
+    r"^[ \t]*(?:(?:@[A-Za-z_][A-Za-z0-9_]*"
+    r"(?:[ \t]*\([^()\n]*\))?)[ \t]*(?:\n[ \t]*)?)*"
+    r"import[ \t]+"
+    r"(?:(?:class|enum|func|let|protocol|struct|typealias|var)[ \t]+)?"
+    r"(?P<module>SwiftUI|UIKit|AppKit|WatchKit|TVMLKit|RealityKit|SceneKit|SpriteKit)"
+    r"(?=\.|\b)",
     re.MULTILINE,
 )
 NATIVE_UI_MANIFEST = re.compile(
