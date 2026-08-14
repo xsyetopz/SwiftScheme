@@ -33,7 +33,7 @@ fixtures; they are not invented test identifiers.
 | `[~]` | Roots/powers: exact perfect roots, integer powers, complex branches | `exact square roots and magnitudes`; `exact numeric results` | Add non-perfect roots, negative powers, and complex branch cases. |
 | `[~]` | Complex construction/accessors: `make-rectangular`, `make-polar`, `real-part`, `imag-part`, `magnitude`, `angle` | `exact square roots and magnitudes` covers magnitude only | Add constructor/accessor and polar angle coverage. |
 | `[ ]` | Exactness conversion: `exact->inexact`, `inexact->exact` for real/complex values | No dedicated current assertion | Add binary64 boundary, complex, and error cases. |
-| `[N/A]` | External upstream suites | Chibi/Larceny/Racket trees were local uncommitted audit inputs and are intentionally absent from this frozen candidate (`019a6415ead2b4cd669cc7d5420f4a3028456d2f`); no upstream result is claimed here | If these suites become release evidence, add them in a separately reviewed/vetted candidate with license and revision records. |
+| `[N/A]` | External upstream suites | Chibi/Larceny/Racket trees were local uncommitted audit inputs and are intentionally absent from this frozen candidate; no upstream result is claimed here | If these suites become release evidence, add them in a separately reviewed/vetted candidate with license and revision records. |
 | `[~]` | Numeric real programs: factorial, rational approximation, complex iteration | `Tests/Fixtures/numeric-programs.scm` is present as a data fixture | Add a Swift Testing fixture runner and record exact output before treating it as executable evidence. |
 
 ## Reader grammar page anchors
