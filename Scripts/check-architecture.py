@@ -125,11 +125,17 @@ def _strip_swift_noise(source: str) -> str:
         ):
             return False
         previous = start - 1
-        while previous >= 0 and source[previous].isspace():
+        had_newline = False
+        while previous >= 0 and output[previous].isspace():
+            had_newline = had_newline or output[previous] in "\r\n"
             previous -= 1
-        if previous < 0 or source[previous] in "([{=,:;!&|?+-*%^~<>":
+        if (
+            previous < 0
+            or had_newline
+            or output[previous] in "([{=,:;!&|?+-*%^~<>"
+        ):
             return True
-        prefix = source[: previous + 1]
+        prefix = "".join(output[: previous + 1])
         keyword = re.search(r"[A-Za-z_][A-Za-z0-9_]*$", prefix)
         return bool(
             keyword and keyword.group(0) in {"case", "return", "throw", "yield"}
