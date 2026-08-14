@@ -123,7 +123,7 @@ def _swift_import_declarations(path: Path) -> tuple[list[tuple[str, str]], str |
 
     try:
         result = subprocess.run(
-            ["swiftc", "-frontend", "-dump-parse", str(path)],
+            ["swiftc", "-frontend", "-swift-version", "6", "-dump-parse", str(path)],
             cwd=ROOT,
             check=False,
             capture_output=True,
