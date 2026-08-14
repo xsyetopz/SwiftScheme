@@ -978,7 +978,9 @@ private func makeList<S: Sequence>(_ values: S, tail: Value = .empty) -> Value
 where S.Element == Value { Array(values).reversed().reduce(tail) { .pair(Pair($1, $0)) } }
 
 private let nonstandardSymbolPrefix = "\u{1}"
-private let internalSyntaxPrefix = "\u{2}r5rs:"
+private let internalSymbolPrefix = "\u{2}r5rs:"
+private let internalSyntaxPrefix = internalSymbolPrefix + "syntax:"
+private let internalTemporaryPrefix = internalSymbolPrefix + "temp:"
 
 private func internalSyntax(_ name: String) -> Value {
   .symbol(internalSyntaxPrefix + name)
@@ -989,9 +991,14 @@ private func internalSyntaxName(_ value: Value) -> String? {
   return String(name.dropFirst(internalSyntaxPrefix.count))
 }
 
+private func internalTemporary(_ name: String) -> Value {
+  .symbol(internalTemporaryPrefix + name)
+}
+
 private func symbolToken(_ spelling: String) -> String {
   let canonical = spelling.lowercased()
   return spelling == canonical && !spelling.hasPrefix(nonstandardSymbolPrefix)
+    && !spelling.hasPrefix(internalSymbolPrefix)
     ? canonical
     : nonstandardSymbolPrefix + spelling
 }
@@ -2790,11 +2797,11 @@ public final class Interpreter {
     guard let first = expressions.first else { return .boolean(false) }
     if expressions.count == 1 { return first }
     macroSerial += 1
-    let temp = "or#\(macroSerial)"
+    let temp = internalTemporary("or#\(macroSerial)")
     return makeList([
-      internalSyntax("let"), makeList([makeList([.symbol(temp), first])]),
+      internalSyntax("let"), makeList([makeList([temp, first])]),
       makeList([
-        internalSyntax("if"), .symbol(temp), .symbol(temp), expandOr(Array(expressions.dropFirst()))
+        internalSyntax("if"), temp, temp, expandOr(Array(expressions.dropFirst()))
       ])
     ])
   }
@@ -2814,10 +2821,10 @@ public final class Interpreter {
     let rest = try expandCond(Array(clauses.dropFirst()), environment)
     if clause.count == 1 {
       macroSerial += 1
-      let temp = "cond#\(macroSerial)"
+      let temp = internalTemporary("cond#\(macroSerial)")
       return makeList([
-        internalSyntax("let"), makeList([makeList([.symbol(temp), clause[0]])]),
-        makeList([internalSyntax("if"), .symbol(temp), .symbol(temp), rest])
+        internalSyntax("let"), makeList([makeList([temp, clause[0]])]),
+        makeList([internalSyntax("if"), temp, temp, rest])
       ])
     }
     let arrowKeyword =
@@ -2825,10 +2832,10 @@ public final class Interpreter {
       && isSymbol(clause[1], "=>")
     if arrowKeyword {
       macroSerial += 1
-      let temp = "cond#\(macroSerial)"
+      let temp = internalTemporary("cond#\(macroSerial)")
       return makeList([
-        internalSyntax("let"), makeList([makeList([.symbol(temp), clause[0]])]),
-        makeList([internalSyntax("if"), .symbol(temp), makeList([clause[2], .symbol(temp)]), rest])
+        internalSyntax("let"), makeList([makeList([temp, clause[0]])]),
+        makeList([internalSyntax("if"), temp, makeList([clause[2], temp]), rest])
       ])
     }
     return makeList([
@@ -2840,7 +2847,8 @@ public final class Interpreter {
   private func expandCase(_ form: [Value], _ environment: SchemeEnvironment) throws -> Value {
     guard form.count >= 3 else { throw SchemeError.syntax("case requires key and clauses") }
     macroSerial += 1
-    let key = "case#\(macroSerial)"
+    let key = internalTemporary("case#\(macroSerial)")
+    var seenDatums: [Value] = []
     func clauses(_ remaining: ArraySlice<Value>) throws -> Value {
       guard let first = remaining.first else { return .unspecified }
       let clause = try array(from: first, context: "case clause")
@@ -2853,13 +2861,14 @@ public final class Interpreter {
         return makeList([internalSyntax("begin")] + Array(clause.dropFirst()))
       }
       let datums = try array(from: clause[0], context: "case datums")
-      for index in datums.indices {
-        guard !datums[(index + 1)...].contains(where: { eqv(datums[index], $0) }) else {
+      for datum in datums {
+        guard !seenDatums.contains(where: { eqv($0, datum) }) else {
           throw SchemeError.syntax("duplicate case datum")
         }
+        seenDatums.append(datum)
       }
       let tests = datums.map {
-        coreCall("eqv?", [.symbol(key), quoted($0)])
+        coreCall("eqv?", [key, quoted($0)])
       }
       return makeList([
         internalSyntax("if"), expandOr(tests),
@@ -2868,7 +2877,7 @@ public final class Interpreter {
       ])
     }
     return makeList([
-      internalSyntax("let"), makeList([makeList([.symbol(key), form[1]])]),
+      internalSyntax("let"), makeList([makeList([key, form[1]])]),
       try clauses(form.dropFirst(2))
     ])
   }
@@ -2884,19 +2893,19 @@ public final class Interpreter {
     let test = try array(from: form[2], context: "do test")
     guard !test.isEmpty else { throw SchemeError.syntax("empty do test") }
     macroSerial += 1
-    let loop = "do#\(macroSerial)"
+    let loop = internalTemporary("do#\(macroSerial)")
     let names = try specs.map { try identifier($0[0], "do") }
     guard Set(names).count == names.count else { throw SchemeError.syntax("duplicate do variable") }
     let steps = zip(specs, names).map { $0.0.count == 3 ? $0.0[2] : .symbol($0.1) }
     let done =
       test.count == 1 ? .unspecified : makeList([internalSyntax("begin")] + Array(test.dropFirst()))
-    let recur = makeList([.symbol(loop)] + steps)
+    let recur = makeList([loop] + steps)
     let body = makeList([
       internalSyntax("if"), test[0], done,
       makeList([internalSyntax("begin")] + Array(form.dropFirst(3)) + [recur])
     ])
     return makeList([
-      internalSyntax("let"), .symbol(loop),
+      internalSyntax("let"), loop,
       makeList(zip(names, specs).map { makeList([.symbol($0.0), $0.1[1]]) }), body
     ])
   }
@@ -4104,7 +4113,11 @@ private func scalarCaseMap(_ character: Character, upper: Bool) -> Character {
 }
 
 private func scalarCaseKey(_ character: Character) -> String {
-  scalarCaseMapping(character, upper: false)
+  let upper = scalarCaseMapping(character, upper: true)
+  if upper.unicodeScalars.count == 1 { return upper }
+  let lower = scalarCaseMapping(character, upper: false)
+  if lower.unicodeScalars.count == 1 { return lower }
+  return String(character)
 }
 
 private func charPredicate(_ args: [Value], _ name: String, _ test: (Character) -> Bool) throws

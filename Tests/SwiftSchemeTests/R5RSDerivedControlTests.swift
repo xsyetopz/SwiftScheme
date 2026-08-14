@@ -51,6 +51,9 @@ struct R5RSDerivedControlTests {
     expectDerivedError("(if #t (define x 1) 2)", "expression definition")
     expectDerivedError("(case 1 ((1 1) 42))", "duplicate case datum")
     expectDerivedError(
+      "(case 2 ((1) 'first) ((1) 'second) (else 'ok))", "cross-clause case datum"
+    )
+    expectDerivedError(
       "(let ((else #f)) (case 2 ((1) 42) (else 99)))", "lexically bound case else"
     )
     expectDerivedError(
@@ -62,5 +65,28 @@ struct R5RSDerivedControlTests {
   func emptyListProcedureDomains() {
     expectDerivedError("(map 1 '())", "map procedure")
     expectDerivedError("(for-each 1 '())", "for-each procedure")
+  }
+
+  @Test("generated syntax and temporary identifiers remain opaque through eval")
+  func generatedTokensRemainOpaque() throws {
+    let result = try evaluateDerived(
+      """
+      (let ((s (string->symbol
+                 (string-append (string (integer->char 2)) "r5rs:temp:or#1"))))
+        (eval (list 'let (list (list s 42)) (list 'or #f s))
+              (interaction-environment)))
+      """
+    )
+    #expect(result.written == "42")
+    expectDerivedError(
+      """
+      (eval
+        (list (string->symbol
+                (string-append (string (integer->char 2)) "r5rs:syntax:if"))
+              #t 1 2)
+        (interaction-environment))
+      """,
+      "forged internal syntax marker"
+    )
   }
 }
