@@ -1,0 +1,15 @@
+# SwiftPM build products
+.build/
+.swiftpm/
+
+# Local Kimi session and editor state
+.kimi-home/
+.vscode-tui-*/
+.vscode-user/
+
+# Swift compiler diagnostics and dependency files
+*.d
+*.dia
+
+# macOS metadata
+.DS_Store
