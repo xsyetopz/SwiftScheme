@@ -137,9 +137,34 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
       }
     }
 
+    var exponent = bitWidth - 1
+    let discardedBits = bitWidth - requestedBits
+    if discardedBits > 0 {
+      let guardIndex = discardedBits - 1
+      let guardWord = guardIndex / 32
+      let guardBit = (words[guardWord] & (UInt32(1) << UInt32(guardIndex % 32))) != 0
+      var sticky = false
+      if guardIndex > 0 {
+        let fullWords = guardIndex / 32
+        if words[..<fullWords].contains(where: { $0 != 0 }) {
+          sticky = true
+        }
+        let remainder = guardIndex % 32
+        if !sticky && remainder > 0 {
+          let mask = (UInt32(1) << UInt32(remainder)) - 1
+          sticky = (words[fullWords] & mask) != 0
+        }
+      }
+      if guardBit && (sticky || (leading & 1) != 0) { leading += 1 }
+      if leading == UInt64(1) << UInt64(requestedBits) {
+        leading >>= 1
+        exponent += 1
+      }
+    }
+
     let scale = Foundation.scalbn(1.0, Int32(requestedBits - 1))
     let signed = Double(leading) / scale
-    return (sign < 0 ? -signed : signed, bitWidth - 1)
+    return (sign < 0 ? -signed : signed, exponent)
   }
 
   private var unsignedMagnitude: UInt64? {

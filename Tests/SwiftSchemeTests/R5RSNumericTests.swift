@@ -199,6 +199,16 @@ import Testing
     #expect(result.written == "((#t #t) (#t #t) (#t #t) (#t #t) (#t #t) (#t #t))")
   }
 
+  @Test("exact->inexact rounds large integers to the nearest binary64 value") @MainActor
+  func exactToInexactRoundsLargeIntegers() throws {
+    let result = try r5rsEvaluate(
+      "(list (eqv? (exact->inexact 9007199254740993) 9007199254740992.0) "
+        + "(eqv? (exact->inexact 18014398509481987) 18014398509481988.0) "
+        + "(eqv? (exact->inexact -18014398509481987) -18014398509481988.0))"
+    )
+    #expect(result.written == "(#t #t #t)")
+  }
+
   @Test("signed-zero branch cuts stay inside the R5RS angle range") @MainActor
   func signedZeroBranchCuts() throws {
     let result = try r5rsEvaluate(
