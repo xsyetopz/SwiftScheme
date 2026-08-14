@@ -46,6 +46,7 @@ public final class SchemeString {
   public var characters: [Character]
   fileprivate var isLiteral = false
   public init(_ value: String) { characters = Array(value) }
+  init(characters: [Character]) { self.characters = characters }
   public var string: String { String(characters) }
 }
 
@@ -3519,7 +3520,7 @@ public final class Interpreter {
     }
 
     primitive("string", in: env) {
-      .string(SchemeString(String(try $0.map { try character($0, "string") })))
+      .string(SchemeString(characters: try $0.map { try character($0, "string") }))
     }
     primitive("make-string", in: env) { args in
       guard args.count == 1 || args.count == 2 else {
@@ -3558,10 +3559,14 @@ public final class Interpreter {
       let a = try index(args[1], "substring")
       let b = try index(args[2], "substring")
       guard a <= b && b <= chars.count else { throw SchemeError.numeric("invalid substring range") }
-      return .string(SchemeString(String(chars[a..<b])))
+      return .string(SchemeString(characters: Array(chars[a..<b])))
     }
     primitive("string-append", in: env) {
-      .string(SchemeString(try $0.map { try schemeString($0, "string-append").string }.joined()))
+      .string(
+        SchemeString(
+          characters: try $0.flatMap { try schemeString($0, "string-append").characters }
+        )
+      )
     }
     primitive("string->list", in: env) {
       try require($0, 1, "string->list")
@@ -3570,12 +3575,16 @@ public final class Interpreter {
     primitive("list->string", in: env) {
       try require($0, 1, "list->string")
       return .string(
-        SchemeString(String(try array(from: $0[0]).map { try character($0, "list->string") }))
+        SchemeString(
+          characters: try array(from: $0[0]).map { try character($0, "list->string") }
+        )
       )
     }
     primitive("string-copy", in: env) {
       try require($0, 1, "string-copy")
-      return .string(SchemeString(try schemeString($0[0], "string-copy").string))
+      return .string(
+        SchemeString(characters: try schemeString($0[0], "string-copy").characters)
+      )
     }
     primitive("string-fill!", in: env) { args in
       try require(args, 2, "string-fill!")

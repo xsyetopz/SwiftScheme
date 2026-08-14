@@ -116,6 +116,35 @@ struct R5RSIODataTests {
     #expect(ordering.written == "(#t #t #f #f)")
   }
 
+  @Test("R5RS §6.3.5 string constructors preserve stored character boundaries")
+  func stringConstructorsPreserveCharacterBoundaries() throws {
+    let result = try evaluateIO(
+      """
+      (let ((source (make-string 2 #\\a)) (mark (integer->char 768)))
+        (string-set! source 1 mark)
+        (let ((constructed (string (string-ref source 0) (string-ref source 1)))
+              (sliced (substring source 0 2))
+              (joined (string-append source ""))
+              (roundTrip (list->string (string->list source)))
+              (copied (string-copy source)))
+          (list (string-length constructed) (string-length sliced)
+                (string-length joined) (string-length roundTrip) (string-length copied)
+                (char=? (string-ref constructed 1) mark)
+                (char=? (string-ref sliced 1) mark)
+                (char=? (string-ref joined 1) mark)
+                (char=? (string-ref roundTrip 1) mark)
+                (char=? (string-ref copied 1) mark)
+                (equal? source constructed) (equal? source sliced)
+                (equal? source joined) (equal? source roundTrip)
+                (equal? source copied))))
+      """
+    )
+    #expect(
+      result.written ==
+        "(2 2 2 2 2 #t #t #t #t #t #t #t #t #t #t)"
+    )
+  }
+
   @Test("R5RS §6.3.2 list consumers reject non-list and improper arguments")
   func listArgumentDomains() {
     expectIOError("(list-tail 1 0)", "list-tail scalar domain")
