@@ -115,8 +115,62 @@ def _strip_swift_noise(source: str) -> str:
             cursor += 1
         return length
 
+    def regex_start(start: int) -> bool:
+        """Return whether a bare slash at `start` can open a regex literal."""
+
+        if (
+            source[start] != "/"
+            or source.startswith("//", start)
+            or source.startswith("/*", start)
+        ):
+            return False
+        previous = start - 1
+        while previous >= 0 and source[previous].isspace():
+            previous -= 1
+        if previous < 0 or source[previous] in "([{=,:;!&|?+-*%^~<>":
+            return True
+        prefix = source[: previous + 1]
+        keyword = re.search(r"[A-Za-z_][A-Za-z0-9_]*$", prefix)
+        return bool(
+            keyword and keyword.group(0) in {"case", "return", "throw", "yield"}
+        )
+
+    def regex_end(start: int, extended: bool) -> int:
+        """Find a Swift slash/extended-regex closing delimiter, if present."""
+
+        cursor = start + (2 if extended else 1)
+        closing = "/#" if extended else "/"
+        while cursor < length:
+            if source[cursor] == "\\":
+                # Escaped slash, hash, or backslash cannot close the literal;
+                # preserving the next character also handles escaped pairs.
+                cursor += 2
+                continue
+            if source.startswith(closing, cursor):
+                return cursor + len(closing)
+            if not extended and source[cursor] in "\r\n":
+                # Bare regex literals are single-line; let normal source
+                # scanning continue when no closing delimiter was found.
+                return start
+            cursor += 1
+        return start
+
     cursor = 0
     while cursor < length:
+        if source.startswith("#/", cursor):
+            end = regex_end(cursor, extended=True)
+            if end != cursor:
+                blank(cursor, end)
+                cursor = end
+                continue
+
+        if source[cursor] == "/" and regex_start(cursor):
+            end = regex_end(cursor, extended=False)
+            if end != cursor:
+                blank(cursor, end)
+                cursor = end
+                continue
+
         if source.startswith("//", cursor):
             end = source.find("\n", cursor + 2)
             blank(cursor, length if end < 0 else end)
