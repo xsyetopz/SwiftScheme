@@ -147,6 +147,36 @@ import Testing
     #expect(result.written == "(0 0 1 1 0.0 1.0 8 #t)")
   }
 
+  @Test("radix arguments accept exact complex integers") @MainActor
+  func radixAcceptsExactComplexInteger() throws {
+    let result = try r5rsEvaluate(
+      "(list (number->string 255 16+0i) (string->number \"ff\" 16+0i))"
+    )
+    #expect(result.written == "(\"ff\" 255)")
+  }
+
+  @Test("signed-zero branch cuts stay inside the R5RS angle range") @MainActor
+  func signedZeroBranchCuts() throws {
+    let result = try r5rsEvaluate(
+      """
+      (let ((pi 3.141592653589793))
+        (and (> (angle -0.0-0.0i) (- pi))
+             (<= (angle -0.0-0.0i) pi)
+             (> (atan -0.0 -0.0) (- pi))
+             (<= (atan -0.0 -0.0) pi)
+             (> (imag-part (log -0.0-0.0i)) (- pi))
+             (<= (imag-part (log -0.0-0.0i)) pi)))
+      """
+    )
+    #expect(result.written == "#t")
+  }
+
+  @Test("real transcendental overflow retains a real external form") @MainActor
+  func transcendentalOverflowRetainsRealDomain() throws {
+    let result = try r5rsEvaluate("(list (real? (exp 1000)) (number->string (exp 1000)))")
+    #expect(result.written == "(#t \"+inf.0\")")
+  }
+
   @Test("numeric-programs fixture captures its complete output") @MainActor
   func numericProgramsFixture() throws {
     let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()

@@ -3205,12 +3205,11 @@ public final class Interpreter {
         throw SchemeError.arity("atan expects 1 or 2 arguments")
       }
       if args.count == 2 {
-        return .real(
-          Foundation.atan2(
-            try realComponent(args[0], "atan").doubleValue,
-            try realComponent(args[1], "atan").doubleValue
-          )
+        let angle = Foundation.atan2(
+          try realComponent(args[0], "atan").doubleValue,
+          try realComponent(args[1], "atan").doubleValue
         )
+        return .real(angle == -.pi ? .pi : angle)
       }
       return numberValue(complexTranscendental("atan", try schemeNumber(args[0])))
     }
@@ -3814,10 +3813,12 @@ private func number(_ value: Value) throws -> Double {
 }
 
 private func exactInteger(_ value: Value, _ context: String) throws -> BigInt {
-  guard case .integer(let n) = value else {
+  guard let number = try? schemeNumber(value), number.isExact, number.parts.imaginary.isZero,
+    case .exact(let rational) = number.parts.real, rational.isInteger
+  else {
     throw SchemeError.type("\(context) expects an exact integer")
   }
-  return n
+  return rational.numerator
 }
 
 private func exactIntegerExponent(_ number: SchemeNumber) -> Int? {
@@ -3916,15 +3917,17 @@ private func inexactComplex(_ number: SchemeNumber) -> InexactComplex {
 }
 private func complexExp(_ z: InexactComplex) -> InexactComplex {
   let scale = Foundation.exp(z.real)
+  let sine = Foundation.sin(z.imaginary)
   return InexactComplex(
     real: scale * Foundation.cos(z.imaginary),
-    imaginary: scale * Foundation.sin(z.imaginary)
+    imaginary: sine == 0 ? sine : scale * sine
   )
 }
 private func complexLog(_ z: InexactComplex) -> InexactComplex {
-  InexactComplex(
+  let angle = Foundation.atan2(z.imaginary, z.real)
+  return InexactComplex(
     real: Foundation.log(Foundation.hypot(z.real, z.imaginary)),
-    imaginary: Foundation.atan2(z.imaginary, z.real)
+    imaginary: angle == -.pi ? .pi : angle
   )
 }
 private func complexMultiply(_ a: InexactComplex, _ b: InexactComplex) -> InexactComplex {

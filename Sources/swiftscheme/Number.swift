@@ -342,7 +342,8 @@ public enum SchemeNumber: Hashable, Sendable, CustomStringConvertible {
 
   public var angle: Double {
     let value = parts
-    return Foundation.atan2(value.imaginary.doubleValue, value.real.doubleValue)
+    let angle = Foundation.atan2(value.imaginary.doubleValue, value.real.doubleValue)
+    return angle == -.pi ? .pi : angle
   }
 
   public func exactPower(_ exponent: Int) throws -> SchemeNumber {
