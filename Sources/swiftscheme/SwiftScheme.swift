@@ -4113,11 +4113,20 @@ private func scalarCaseMap(_ character: Character, upper: Bool) -> Character {
 }
 
 private func scalarCaseKey(_ character: Character) -> String {
-  let upper = scalarCaseMapping(character, upper: true)
-  if upper.unicodeScalars.count == 1 { return upper }
-  let lower = scalarCaseMapping(character, upper: false)
-  if lower.unicodeScalars.count == 1 { return lower }
-  return String(character)
+  var pending = [character]
+  var keys = Set<String>()
+  while let current = pending.popLast() {
+    let spelling = String(current)
+    guard keys.insert(spelling).inserted else { continue }
+    for upper in [true, false] {
+      let mapped = scalarCaseMapping(current, upper: upper)
+      guard mapped.unicodeScalars.count == 1, let scalar = mapped.unicodeScalars.first else {
+        continue
+      }
+      pending.append(Character(String(scalar)))
+    }
+  }
+  return keys.min() ?? String(character)
 }
 
 private func charPredicate(_ args: [Value], _ name: String, _ test: (Character) -> Bool) throws

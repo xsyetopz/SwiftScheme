@@ -73,6 +73,9 @@ struct R5RSIODataTests {
              (char-alphabetic? #\\ſ)
              (char=? #\\S (char-upcase #\\ſ))
              (char-ci=? #\\ſ #\\S)
+             (char-alphabetic? #\\ẞ)
+             (char=? #\\ß (char-downcase #\\ẞ))
+             (char-ci=? #\\ẞ #\\ß)
              (char=? #\\İ (integer->char (char->integer (char-downcase #\\İ))))))
       """
     )
