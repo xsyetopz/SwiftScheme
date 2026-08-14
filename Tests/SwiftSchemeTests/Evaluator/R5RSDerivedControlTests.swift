@@ -1,28 +1,24 @@
 import SwiftScheme
 import Testing
 
-@MainActor
-private func evaluateDerived(_ source: String) throws -> Value {
+@MainActor private func evaluateDerived(_ source: String) throws -> Value {
   try Interpreter(output: { _ in }).evaluate(source)
 }
 
-@MainActor
-private func expectDerivedError(_ source: String, _ label: String) {
+@MainActor private func expectDerivedError(_ source: String, _ label: String) {
   do {
     _ = try evaluateDerived(source)
     #expect(Bool(false), "\(label): expected SchemeError")
-  } catch is SchemeError {
-    // R5RS specifies the error condition, not host diagnostic wording.
-  } catch {
+  } catch is SchemeError {} catch {
     #expect(Bool(false), "\(label): expected SchemeError, got \(error)")
   }
 }
 
-@Suite("R5RS §4.2 derived expressions and §6.4 control domains")
-@MainActor
+@Suite("R5RS §4.2 derived expressions and §6.4 control domains") @MainActor
 struct R5RSDerivedControlTests {
-  @Test("derived syntax and helper procedures resist lexical shadowing")
-  func derivedHygiene() throws {
+  @Test("derived syntax and helper procedures resist lexical shadowing") func derivedHygiene()
+    throws
+  {
     let result = try evaluateDerived(
       """
       (list
@@ -50,25 +46,17 @@ struct R5RSDerivedControlTests {
     expectDerivedError("(begin)", "empty begin")
     expectDerivedError("(if #t (define x 1) 2)", "expression definition")
     expectDerivedError("(case 1 ((1 1) 42))", "duplicate case datum")
-    expectDerivedError(
-      "(case 2 ((1) 'first) ((1) 'second) (else 'ok))", "cross-clause case datum"
-    )
-    expectDerivedError(
-      "(let ((else #f)) (case 2 ((1) 42) (else 99)))", "lexically bound case else"
-    )
-    expectDerivedError(
-      "(do ((x 0) (x 1)) ((= x 0) x))", "duplicate do variable"
-    )
+    expectDerivedError("(case 2 ((1) 'first) ((1) 'second) (else 'ok))", "cross-clause case datum")
+    expectDerivedError("(let ((else #f)) (case 2 ((1) 42) (else 99)))", "lexically bound case else")
+    expectDerivedError("(do ((x 0) (x 1)) ((= x 0) x))", "duplicate do variable")
   }
 
-  @Test("map and for-each validate procedures on empty lists")
-  func emptyListProcedureDomains() {
+  @Test("map and for-each validate procedures on empty lists") func emptyListProcedureDomains() {
     expectDerivedError("(map 1 '())", "map procedure")
     expectDerivedError("(for-each 1 '())", "for-each procedure")
   }
 
-  @Test("R5RS §6.5 eval rejects non-expression data")
-  func evalExpressionDomains() {
+  @Test("R5RS §6.5 eval rejects non-expression data") func evalExpressionDomains() {
     expectDerivedError("(eval '() (null-environment 5))", "eval empty list")
     expectDerivedError("(eval '#(1 2) (null-environment 5))", "eval vector datum")
     expectDerivedError("()", "empty application")

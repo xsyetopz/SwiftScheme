@@ -2,28 +2,21 @@ import Foundation
 import SwiftScheme
 import Testing
 
-@MainActor
-private func evaluateIO(_ source: String) throws -> Value {
+@MainActor private func evaluateIO(_ source: String) throws -> Value {
   try Interpreter(output: { _ in }).evaluate(source)
 }
 
-@MainActor
-private func expectIOError(_ source: String, _ label: String) {
+@MainActor private func expectIOError(_ source: String, _ label: String) {
   do {
     _ = try evaluateIO(source)
     #expect(Bool(false), "\(label): expected an error")
-  } catch is SchemeError {
-    // R5RS specifies the error condition, not the host diagnostic wording.
-  } catch {
+  } catch is SchemeError {} catch {
     #expect(Bool(false), "\(label): expected SchemeError, got \(error)")
   }
 }
 
-@Suite("R5RS §6.3.4–6.3.6 and §6.6 I/O/data contracts")
-@MainActor
-struct R5RSIODataTests {
-  @Test("source literals reject mutation")
-  func immutableLiterals() {
+@Suite("R5RS §6.3.4–6.3.6 and §6.6 I/O/data contracts") @MainActor struct R5RSIODataTests {
+  @Test("source literals reject mutation") func immutableLiterals() {
     expectIOError("(set-car! '(1 2) 3)", "literal pair")
     expectIOError("(set-cdr! '(1 2) '())", "literal pair cdr")
     expectIOError("(string-set! \"abc\" 0 #\\z)", "literal string")
@@ -36,8 +29,8 @@ struct R5RSIODataTests {
     )
   }
 
-  @Test("symbols preserve standard case and string-created spelling")
-  func symbolConversion() throws {
+  @Test("symbols preserve standard case and string-created spelling") func symbolConversion() throws
+  {
     let result = try evaluateIO(
       "(list (symbol->string 'Martin) (symbol->string (string->symbol \"bitBlt\")) "
         + "(eq? 'bitBlt (string->symbol \"bitBlt\")) "
@@ -95,14 +88,11 @@ struct R5RSIODataTests {
   @Test("R5RS §6.3.5 string-ci preserves stored character boundaries")
   func stringCaseOrderingPreservesCharacterBoundaries() throws {
     let equality = try evaluateIO(
-      "(let ((a (make-string 2 #\\a)) (b (make-string 2 #\\a)) "
-        + "(mark (integer->char 768))) "
-        + "(string-set! b 0 #\\A) (string-set! a 1 mark) "
-        + "(string-set! b 1 mark) "
+      "(let ((a (make-string 2 #\\a)) (b (make-string 2 #\\a)) " + "(mark (integer->char 768))) "
+        + "(string-set! b 0 #\\A) (string-set! a 1 mark) " + "(string-set! b 1 mark) "
         + "(list (string-length a) (string-length b) "
         + "(char-ci=? (string-ref a 0) (string-ref b 0)) "
-        + "(char-ci=? (string-ref a 1) (string-ref b 1)) "
-        + "(string-ci=? a b)))"
+        + "(char-ci=? (string-ref a 1) (string-ref b 1)) " + "(string-ci=? a b)))"
     )
     #expect(equality.written == "(2 2 #t #t #t)")
 
@@ -139,14 +129,12 @@ struct R5RSIODataTests {
                 (equal? source copied))))
       """
     )
-    #expect(
-      result.written ==
-        "(2 2 2 2 2 #t #t #t #t #t #t #t #t #t #t)"
-    )
+    #expect(result.written == "(2 2 2 2 2 #t #t #t #t #t #t #t #t #t #t)")
   }
 
-  @Test("R5RS §6.3.4 rejects multi-scalar character literals")
-  func scalarCharacterLiteralDomain() throws {
+  @Test("R5RS §6.3.4 rejects multi-scalar character literals") func scalarCharacterLiteralDomain()
+    throws
+  {
     do {
       _ = try evaluateIO("#\\e\u{301}")
       #expect(Bool(false), "multi-scalar character literal should fail")
@@ -154,9 +142,7 @@ struct R5RSIODataTests {
       #expect(message == "invalid character literal #\\e\u{301}")
       #expect(line == 1)
       #expect(column == 3)
-    } catch {
-      #expect(Bool(false), "expected lexical error, got \(error)")
-    }
+    } catch { #expect(Bool(false), "expected lexical error, got \(error)") }
 
     do {
       _ = try evaluateIO("e\u{301}")
@@ -165,9 +151,7 @@ struct R5RSIODataTests {
       #expect(message == "invalid identifier e\u{301}")
       #expect(line == 1)
       #expect(column == 1)
-    } catch {
-      #expect(Bool(false), "expected lexical error, got \(error)")
-    }
+    } catch { #expect(Bool(false), "expected lexical error, got \(error)") }
   }
 
   @Test("R5RS §6.3.4 strings and ports expose scalar character boundaries")
@@ -258,18 +242,14 @@ struct R5RSIODataTests {
     expectIOError("(list-tail '(a) 2)", "list-tail bounds")
     expectIOError("(memq 'a 1)", "memq scalar domain")
     expectIOError("(memq 'z '(a . b))", "memq improper domain")
-    expectIOError(
-      "(let ((x (cons 'a '()))) (set-cdr! x x) (memq 'z x))",
-      "memq cyclic domain"
-    )
+    expectIOError("(let ((x (cons 'a '()))) (set-cdr! x x) (memq 'z x))", "memq cyclic domain")
     expectIOError("(memv 'a 1)", "memv scalar domain")
     expectIOError("(memv 'z '(a . b))", "memv improper domain")
     expectIOError("(member 'a 1)", "member scalar domain")
     expectIOError("(member 'z '(a . b))", "member improper domain")
   }
 
-  @Test("list-tail and membership preserve valid list results")
-  func validListConsumers() throws {
+  @Test("list-tail and membership preserve valid list results") func validListConsumers() throws {
     let result = try evaluateIO(
       "(list (list-tail '(a b c) 0) (list-tail '(a b c) 2) "
         + "(memq 'b '(a b c)) (memv 2 '(1 2 3)) (member '(b) '((a) (b))))"
@@ -277,8 +257,9 @@ struct R5RSIODataTests {
     #expect(result.written == "((a b c) (c) (b c) (2 3) ((b)))")
   }
 
-  @Test("read-created pairs, strings, and vectors remain mutable")
-  func readValuesAreMutable() throws {
+  @Test("read-created pairs, strings, and vectors remain mutable") func readValuesAreMutable()
+    throws
+  {
     #expect(
       try evaluateIO(
         "(call-with-input-string \"(1 2)\" (lambda (p) (let ((x (read p))) (set-car! x 9) x)))"
@@ -296,8 +277,9 @@ struct R5RSIODataTests {
     )
   }
 
-  @Test("input ports obey read, peek, EOF, readiness, and close contracts")
-  func inputPortMatrix() throws {
+  @Test("input ports obey read, peek, EOF, readiness, and close contracts") func inputPortMatrix()
+    throws
+  {
     let result = try evaluateIO(
       """
       (call-with-input-string " 1 (a . b)"
@@ -317,8 +299,8 @@ struct R5RSIODataTests {
     )
   }
 
-  @Test("omitted input ports reject a closed current input port")
-  func closedCurrentInputDefaults() {
+  @Test("omitted input ports reject a closed current input port") func closedCurrentInputDefaults()
+  {
     for operation in ["read", "read-char", "peek-char", "char-ready?"] {
       expectIOError(
         "(let ((p (current-input-port))) (close-input-port p) (\(operation)))",
@@ -327,16 +309,17 @@ struct R5RSIODataTests {
     }
   }
 
-  @Test("output ports distinguish write, display, and character output")
-  func outputPortMatrix() throws {
+  @Test("output ports distinguish write, display, and character output") func outputPortMatrix()
+    throws
+  {
     let source = """
-    (call-with-output-string
-      (lambda (p)
-        (write "a\n" p)
-        (display "b\n" p)
-        (write-char #\\! p)
-        (newline p)))
-    """
+      (call-with-output-string
+        (lambda (p)
+          (write "a\n" p)
+          (display "b\n" p)
+          (write-char #\\! p)
+          (newline p)))
+      """
     let result = try evaluateIO(source)
     #expect(result.written == "\"\\\"a\n\\\"b\n!\n\"")
   }
@@ -344,10 +327,8 @@ struct R5RSIODataTests {
   @Test("omitted output ports reject a closed current output port")
   func closedCurrentOutputDefaults() {
     let operations = [
-      ("(write 'still-writes)", "write"),
-      ("(display 'still-displays)", "display"),
-      ("(newline)", "newline"),
-      ("(write-char #\\!)", "write-char")
+      ("(write 'still-writes)", "write"), ("(display 'still-displays)", "display"),
+      ("(newline)", "newline"), ("(write-char #\\!)", "write-char")
     ]
     for (operation, name) in operations {
       expectIOError(
@@ -381,8 +362,7 @@ struct R5RSIODataTests {
     )
   }
 
-  @Test("vectors preserve mutation and list conversion contracts")
-  func vectorMatrix() throws {
+  @Test("vectors preserve mutation and list conversion contracts") func vectorMatrix() throws {
     let result = try evaluateIO(
       "(let ((v (make-vector 3 0))) (vector-fill! v 7) (list (vector-length v) (vector-ref v 1) (vector->list v) (list->vector '(a b))))"
     )
@@ -391,20 +371,25 @@ struct R5RSIODataTests {
     expectIOError("(make-vector -1)", "negative vector length")
   }
 
-  @Test("load evaluates source in the interaction environment")
-  func loadAndFiles() throws {
+  @Test("load evaluates source in the interaction environment") func loadAndFiles() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
-      "swiftscheme-r5rs-\(UUID().uuidString)", isDirectory: true
+      "swiftscheme-r5rs-\(UUID().uuidString)",
+      isDirectory: true
     )
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let path = directory.appendingPathComponent("loaded.scm").path
     try "(define loaded-value 41) (+ loaded-value 1)".write(
-      toFile: path, atomically: true, encoding: .utf8
+      toFile: path,
+      atomically: true,
+      encoding: .utf8
     )
-    let quotedPath = "\"" + path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(
-      of: "\"", with: "\\\""
-    ) + "\""
+    let quotedPath =
+      "\""
+      + path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(
+        of: "\"",
+        with: "\\\""
+      ) + "\""
     let interpreter = Interpreter(output: { _ in })
     _ = try interpreter.evaluate("(load \(quotedPath))")
     #expect(try interpreter.evaluate("loaded-value").written == "41")

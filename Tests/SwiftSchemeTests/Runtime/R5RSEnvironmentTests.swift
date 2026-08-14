@@ -1,11 +1,7 @@
 import SwiftScheme
 import Testing
 
-@MainActor
-private func expectSyntaxError(
-  _ operation: () throws -> Value,
-  _ label: String
-) {
+@MainActor private func expectSyntaxError(_ operation: () throws -> Value, _ label: String) {
   do {
     _ = try operation()
     #expect(Bool(false), "\(label): expected a Scheme syntax error")
@@ -18,16 +14,10 @@ private func expectSyntaxError(
       message == "definitions are not allowed in this environment",
       "\(label): unexpected diagnostic: \(message)"
     )
-  } catch {
-    #expect(Bool(false), "\(label): expected SchemeError, got \(error)")
-  }
+  } catch { #expect(Bool(false), "\(label): expected SchemeError, got \(error)") }
 }
 
-@MainActor
-private func expectUnbound(
-  _ operation: () throws -> Value,
-  _ label: String
-) {
+@MainActor private func expectUnbound(_ operation: () throws -> Value, _ label: String) {
   do {
     _ = try operation()
     #expect(Bool(false), "\(label): expected an unbound-variable error")
@@ -36,13 +26,10 @@ private func expectUnbound(
       #expect(Bool(false), "\(label): expected SchemeError.unbound, got \(error)")
       return
     }
-  } catch {
-    #expect(Bool(false), "\(label): expected SchemeError, got \(error)")
-  }
+  } catch { #expect(Bool(false), "\(label): expected SchemeError, got \(error)") }
 }
 
-@MainActor
-private func expectDefinitionRejected(
+@MainActor private func expectDefinitionRejected(
   environmentExpression: String,
   definition: String,
   probe: String,
@@ -61,9 +48,7 @@ private func expectDefinitionRejected(
   )
 }
 
-@Suite("R5RS environment definition policy")
-@MainActor
-struct R5RSEnvironmentTests {
+@Suite("R5RS environment definition policy") @MainActor struct R5RSEnvironmentTests {
   @Test("scheme-report-environment preserves expression evaluation")
   func reportEnvironmentEvaluatesExpressions() throws {
     let interpreter = Interpreter(output: { _ in })
@@ -133,8 +118,7 @@ struct R5RSEnvironmentTests {
     )
   }
 
-  @Test("optional transcript procedures are omitted")
-  func transcriptProceduresAreNotAdvertised() {
+  @Test("optional transcript procedures are omitted") func transcriptProceduresAreNotAdvertised() {
     let interpreter = Interpreter(output: { _ in })
     expectUnbound({ try interpreter.evaluate("transcript-on") }, "transcript-on")
     expectUnbound({ try interpreter.evaluate("transcript-off") }, "transcript-off")

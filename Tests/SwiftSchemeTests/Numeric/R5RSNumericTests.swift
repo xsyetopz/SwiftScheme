@@ -10,9 +10,7 @@ import Testing
   do {
     _ = try r5rsEvaluate(source)
     #expect(Bool(false), "\(label): expected SchemeError")
-  } catch is SchemeError {
-    // The R5RS grammar classifies this input as invalid; the exact diagnostic is implementation-defined.
-  }
+  } catch is SchemeError {}
 }
 
 @Suite("R5RS §7.1.1 numeric and external-form grammar") struct R5RSNumericTests {
@@ -29,7 +27,6 @@ import Testing
       let value = try r5rsEvaluate(item.literal)
       #expect(value.written == item.written, "\(item.literal): unexpected value \(value.written)")
       if case .real = value {
-        // Every placeholder form must produce an inexact real, not an exact integer.
         #expect(try r5rsEvaluate("(inexact? \(item.literal))").written == "#t")
       } else if item.literal.contains("i") {
         #expect(try r5rsEvaluate("(inexact? \(item.literal))").written == "#t")
@@ -141,41 +138,34 @@ import Testing
   func exptZeroAndExactIntegerComplexExponent() throws {
     let result = try r5rsEvaluate(
       "(list (expt 0 -1) (expt 0 1/2) (expt 0 0) (expt 0 0+0i) "
-        + "(expt 0.0 1) (expt 0.0 0.0) (expt 2 3+0i) "
-        + "(exact? (expt 2 3+0i)))"
+        + "(expt 0.0 1) (expt 0.0 0.0) (expt 2 3+0i) " + "(exact? (expt 2 3+0i)))"
     )
     #expect(result.written == "(0 0 1 1 0.0 1.0 8 #t)")
   }
 
   @Test("radix arguments accept exact complex integers") @MainActor
   func radixAcceptsExactComplexInteger() throws {
-    let result = try r5rsEvaluate(
-      "(list (number->string 255 16+0i) (string->number \"ff\" 16+0i))"
-    )
+    let result = try r5rsEvaluate("(list (number->string 255 16+0i) (string->number \"ff\" 16+0i))")
     #expect(result.written == "(\"ff\" 255)")
   }
 
   @Test("string->number keeps the default radix after an exactness prefix") @MainActor
   func stringNumberHonorsDefaultRadixWithExactnessPrefix() throws {
     let result = try r5rsEvaluate(
-      "(list (string->number \"#e11/10\" 2) "
-        + "(string->number \"#i11/10\" 2) "
-        + "(string->number \"#e1.5\" 2) "
-        + "(string->number \"#i1.5\" 2) "
+      "(list (string->number \"#e11/10\" 2) " + "(string->number \"#i11/10\" 2) "
+        + "(string->number \"#e1.5\" 2) " + "(string->number \"#i1.5\" 2) "
         + "(string->number \"#b11/10\" 16))"
     )
     #expect(result.written == "(3/2 1.5 #f #f 3/2)")
   }
 
-  @Test("finite inexact number->string values round-trip in non-decimal radices")
-  @MainActor func numberStringFiniteInexactNonDecimalRoundTrips() throws {
+  @Test("finite inexact number->string values round-trip in non-decimal radices") @MainActor
+  func numberStringFiniteInexactNonDecimalRoundTrips() throws {
     let result = try r5rsEvaluate(
-      "(let ((roundtrip (lambda (value radix) "
-        + "(let ((text (number->string value radix))) "
+      "(let ((roundtrip (lambda (value radix) " + "(let ((text (number->string value radix))) "
         + "(list (eqv? value (string->number text radix)) "
         + "(inexact? (string->number text radix))))))) "
-        + "(list (roundtrip 1.5 2) (roundtrip 1.5 8) "
-        + "(roundtrip 1.5 16) (roundtrip 0.5 2)))"
+        + "(list (roundtrip 1.5 2) (roundtrip 1.5 8) " + "(roundtrip 1.5 16) (roundtrip 0.5 2)))"
     )
     #expect(result.written == "((#t #t) (#t #t) (#t #t) (#t #t))")
   }
@@ -234,7 +224,9 @@ import Testing
   @Test("numeric-programs fixture captures its complete output") @MainActor
   func numericProgramsFixture() throws {
     let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-      .deletingLastPathComponent().appendingPathComponent("Fixtures/numeric-programs.scm")
+      .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(
+        "Fixtures/numeric-programs.scm"
+      )
     let source = try String(contentsOf: fixtureURL, encoding: .utf8)
     var captured = ""
     let interpreter = Interpreter(output: { captured += $0 })
