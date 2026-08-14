@@ -146,8 +146,28 @@ struct R5RSIODataTests {
   }
 
   @Test("R5RS §6.3.4 rejects multi-scalar character literals")
-  func scalarCharacterLiteralDomain() {
-    expectIOError("#\\e\u{301}", "multi-scalar character literal")
+  func scalarCharacterLiteralDomain() throws {
+    do {
+      _ = try evaluateIO("#\\e\u{301}")
+      #expect(Bool(false), "multi-scalar character literal should fail")
+    } catch let SchemeError.lexical(message, line, column) {
+      #expect(message == "invalid character literal #\\e\u{301}")
+      #expect(line == 1)
+      #expect(column == 3)
+    } catch {
+      #expect(Bool(false), "expected lexical error, got \(error)")
+    }
+
+    do {
+      _ = try evaluateIO("e\u{301}")
+      #expect(Bool(false), "invalid scalar identifier should fail")
+    } catch let SchemeError.lexical(message, line, column) {
+      #expect(message == "invalid identifier e\u{301}")
+      #expect(line == 1)
+      #expect(column == 1)
+    } catch {
+      #expect(Bool(false), "expected lexical error, got \(error)")
+    }
   }
 
   @Test("R5RS §6.3.4 strings and ports expose scalar character boundaries")
@@ -175,6 +195,35 @@ struct R5RSIODataTests {
       """
     )
     #expect(portResult.written == "(#t #t 101 769)")
+  }
+
+  @Test("public string and character values preserve a safe scalar write/read boundary")
+  func publicScalarValueBoundary() throws {
+    let cluster = Character("e\u{301}")
+    let string = SchemeString("x")
+    string.characters = [cluster]
+    #expect(string.characters.count == 2)
+    #expect(string.characters.allSatisfy { $0.unicodeScalars.count == 1 })
+
+    let interpreter = Interpreter(output: { _ in })
+    let stringRead = try interpreter.read(Value.string(string).written)
+    #expect(stringRead.count == 1)
+    if case .string(let roundTrip) = stringRead.first {
+      #expect(roundTrip.characters.count == 2)
+      #expect(roundTrip.characters.allSatisfy { $0.unicodeScalars.count == 1 })
+    } else {
+      #expect(Bool(false), "normalized string should read as a string")
+    }
+
+    let characterWritten = Value.character(cluster).written
+    #expect(characterWritten == "\"e\u{301}\"")
+    let characterRead = try interpreter.read(characterWritten)
+    #expect(characterRead.count == 1)
+    if case .string(let roundTrip) = characterRead.first {
+      #expect(roundTrip.characters.count == 2)
+    } else {
+      #expect(Bool(false), "invalid host character should write as a string datum")
+    }
   }
 
   @Test("R5RS §6.3.2 list consumers reject non-list and improper arguments")

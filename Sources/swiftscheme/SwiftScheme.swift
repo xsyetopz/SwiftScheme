@@ -43,10 +43,14 @@ public final class Pair: SchemeHeapNode {
 }
 
 public final class SchemeString {
-  public var characters: [Character]
+  private var storedCharacters: [Character]
   fileprivate var isLiteral = false
-  public init(_ value: String) { characters = scalarCharacters(value) }
-  init(characters: [Character]) { self.characters = scalarCharacters(characters) }
+  public var characters: [Character] {
+    get { storedCharacters }
+    set { storedCharacters = scalarCharacters(newValue) }
+  }
+  public init(_ value: String) { storedCharacters = scalarCharacters(value) }
+  init(characters: [Character]) { storedCharacters = scalarCharacters(characters) }
   public var string: String { String(characters) }
 }
 
@@ -482,6 +486,7 @@ private struct Reader {
     guard let first = advance() else {
       throw SchemeError.lexical("incomplete character literal", line: line, column: column)
     }
+    let tokenColumn = column - 1
     var token = String(first)
     while let character = current, !isDelimiter(character) { token.append(advance()!) }
     switch token.lowercased() {
@@ -492,7 +497,7 @@ private struct Reader {
         throw SchemeError.lexical(
           "invalid character literal #\\\(token)",
           line: line,
-          column: column - token.count
+          column: tokenColumn
         )
       }
       return .character(character)
@@ -500,13 +505,14 @@ private struct Reader {
   }
 
   private mutating func atom(starting first: Character) throws -> Value {
+    let tokenColumn = column - 1
     var token = String(first)
     while let character = current, !isDelimiter(character) { token.append(advance()!) }
     if token.contains(where: { "[]{}|".contains($0) }) {
       throw SchemeError.lexical(
         "reserved character in token \(token)",
         line: line,
-        column: column - token.count
+        column: tokenColumn
       )
     }
     let folded = token.lowercased()
@@ -517,28 +523,28 @@ private struct Reader {
       throw SchemeError.lexical(
         "unsupported exact numeric literal \(token)",
         line: line,
-        column: column - token.count
+        column: tokenColumn
       )
     }
     if folded.hasPrefix("#") {
       throw SchemeError.lexical(
         "unsupported or invalid token \(token)",
         line: line,
-        column: column - token.count
+        column: tokenColumn
       )
     }
     if looksNumeric(token) {
       throw SchemeError.lexical(
         "invalid numeric literal \(token)",
         line: line,
-        column: column - token.count
+        column: tokenColumn
       )
     }
     guard isIdentifier(token) else {
       throw SchemeError.lexical(
         "invalid identifier \(token)",
         line: line,
-        column: column - token.count
+        column: tokenColumn
       )
     }
     if token != folded { spellings[folded] = token }
@@ -935,16 +941,12 @@ private enum Writer {
       return SchemeNumber.complex(real: real, imaginary: imaginary).description
     case .boolean(let value): return value ? "#t" : "#f"
     case .character(let value):
+      guard value.unicodeScalars.count == 1 else { return quoted(String(value)) }
       if value == " " { return "#\\space" }
       if value == "\n" { return "#\\newline" }
       return "#\\\(value)"
     case .symbol(let name): return symbolSpelling(name)
-    case .string(let value):
-      return "\""
-        + value.string.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(
-          of: "\"",
-          with: "\\\""
-        ) + "\""
+    case .string(let value): return quoted(value.string)
     case .vector(let vector):
       let identifier = ObjectIdentifier(vector)
       guard active.insert(identifier).inserted else { return "#<cycle>" }
@@ -960,6 +962,14 @@ private enum Writer {
     case .eof: return "#<eof>"
     case .undefined: return "#<undefined>"
     }
+  }
+
+  private static func quoted(_ value: String) -> String {
+    "\""
+      + value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(
+        of: "\"",
+        with: "\\\""
+      ) + "\""
   }
 
   private static func renderPair(_ pair: Pair, _ active: inout Set<ObjectIdentifier>) -> String {
