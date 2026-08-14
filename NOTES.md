@@ -62,7 +62,7 @@ overlapping-range oracles unless that environment changes.
 
 - No Swift recursion remains on evaluator tail paths; the 200,000-call regression passes.
 - Continuation jumps execute `dynamic-wind` exit/entry thunks in order.
-- Macro tests cover hygiene, definition-site references, dotted patterns, custom ellipses, and keyword shadowing.
+- Macro assertions cover hygiene, definition-site references, nested/empty ellipses, and keyword-binding identity; dotted patterns and custom ellipses remain open in the R5RS checklist.
 - `equal?`, `list?`, and printing terminate on cyclic pairs/vectors.
 - Exact integer/rational operations are overflow-free and normalized; mixed exactness and complex branch behavior match the numeric coverage matrix.
 - Reachable cycles and captured continuations survive tracing; unreachable cycle stress reduces and stabilizes the live-node count.
