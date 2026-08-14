@@ -82,7 +82,7 @@ struct R5RSIODataTests {
     #expect(result.written == "#t")
   }
 
-  @Test("string-ci predicates extend char-ci character classes")
+  @Test("R5RS §6.3.5 string-ci extends §6.3.4 char-ci character classes")
   func stringCaseOrderingUsesCharacterKeys() throws {
     let result = try evaluateIO(
       "(list (char-ci=? #\\ſ #\\S) (string-ci=? \"ſ\" \"S\") "
@@ -92,7 +92,7 @@ struct R5RSIODataTests {
     #expect(result.written == "(#t #t #t #t #f #t)")
   }
 
-  @Test("list consumers reject non-list and improper list arguments")
+  @Test("R5RS §6.3.2 list consumers reject non-list and improper arguments")
   func listArgumentDomains() {
     expectIOError("(list-tail 1 0)", "list-tail scalar domain")
     expectIOError("(list-tail '(a . b) 0)", "list-tail improper domain")
