@@ -46,6 +46,8 @@ FORBIDDEN_TEXT = (
     re.compile(r"(?:^|[\\/])Plugins(?:[\\/]|$)"),
     re.compile(r"(?:^|[\\/])Sources[\\/]XCTest(?:[\\/]|$)"),
 )
+# Native import detection is compiler-derived below; this set only defines the
+# no-UI policy after Swift has resolved the declaration's module spelling.
 NATIVE_UI_MODULES = frozenset(
     {
         "SwiftUI",
@@ -58,210 +60,9 @@ NATIVE_UI_MODULES = frozenset(
         "SpriteKit",
     }
 )
-IMPORT_KINDS = frozenset(
-    {"class", "enum", "func", "let", "protocol", "struct", "typealias", "var"}
+IMPORT_DECL = re.compile(
+    r'\(import_decl\b.*?range=\[(?P<range>[^]]+)\].*?module="(?P<module>[^"]+)"'
 )
-SWIFT_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-
-
-def _strip_swift_noise(source: str) -> str:
-    """Blank Swift comments and string literals while preserving newlines.
-
-    The architecture gate only needs import tokens, not a complete Swift
-    parser.  Removing comments and strings first prevents prose, fixtures, and
-    test descriptions from looking like imports.  Block comments are nested in
-    Swift, so their depth is tracked.  Raw and multiline string delimiters are
-    recognized before ordinary quotes.
-    """
-
-    output = list(source)
-    length = len(source)
-
-    def blank(start: int, end: int) -> None:
-        for index in range(start, end):
-            if source[index] not in "\r\n":
-                output[index] = " "
-
-    def string_end(start: int) -> int:
-        hash_count = 0
-        cursor = start
-        while cursor < length and source[cursor] == "#":
-            hash_count += 1
-            cursor += 1
-        if cursor >= length or source[cursor] != '"':
-            return start
-
-        multiline = source.startswith('"""', cursor)
-        opening_length = 3 if multiline else 1
-        content_start = cursor + opening_length
-        if hash_count:
-            closing = '"' * (3 if multiline else 1) + ("#" * hash_count)
-            closing_start = source.find(closing, content_start)
-            return length if closing_start < 0 else closing_start + len(closing)
-
-        # Ordinary strings honor backslash escapes.  This also handles an
-        # escaped triple quote in a multiline string without treating it as
-        # the closing delimiter.
-        cursor = content_start
-        while cursor < length:
-            if source[cursor] == "\\":
-                cursor += 2
-                continue
-            if multiline:
-                if source.startswith('"""', cursor):
-                    return cursor + 3
-            elif source[cursor] == '"':
-                return cursor + 1
-            cursor += 1
-        return length
-
-    def extended_hash_count(start: int) -> int:
-        """Count a valid run of `#` immediately before an extended regex `/`."""
-
-        if source[start] != "#":
-            return 0
-        cursor = start
-        while cursor < length and source[cursor] == "#":
-            cursor += 1
-        return cursor - start if cursor < length and source[cursor] == "/" else 0
-
-    def regex_end(start: int, hash_count: int) -> int:
-        """Find a Swift slash/extended-regex closing delimiter, if present."""
-
-        cursor = start + (hash_count + 1 if hash_count else 1)
-        closing = "/" + ("#" * hash_count)
-        while cursor < length:
-            if source[cursor] == "\\":
-                # Escaped slash, hash, or backslash cannot close the literal;
-                # preserving the next character also handles escaped pairs.
-                cursor += 2
-                continue
-            if not hash_count and (
-                source.startswith("//", cursor)
-                or source.startswith("/*", cursor)
-            ):
-                # A comment marker after a division slash means this is not a
-                # bare regex pair. Leave both slashes for the normal comment
-                # scanner so prose cannot leak import tokens.
-                return start
-            if source.startswith(closing, cursor):
-                end = cursor + len(closing)
-                # An extended delimiter must have exactly the opening hash
-                # count; `/##` cannot close a `#/.../#` literal.
-                if hash_count and end < length and source[end] == "#":
-                    cursor += 1
-                    continue
-                return end
-            if not hash_count and source[cursor] in "\r\n":
-                # Bare regex literals are single-line; let normal source
-                # scanning continue when no closing delimiter was found.
-                return start
-            cursor += 1
-        return start
-
-    cursor = 0
-    while cursor < length:
-        hash_count = extended_hash_count(cursor)
-        if hash_count:
-            end = regex_end(cursor, hash_count)
-            if end != cursor:
-                blank(cursor, end)
-                cursor = end
-                continue
-            # Do not retry suffixes of an unterminated hash run as a smaller
-            # extended delimiter; normal scanning can still find later code.
-            cursor += hash_count
-            continue
-
-        # For a non-comment slash, an escaped-aware closing pair on the same
-        # line is enough to classify the span as a bare regex. This deliberate
-        # lexical policy also covers `switch`/closure expression contexts
-        # without growing a keyword table; unmatched/division-only slashes are
-        # left untouched so later imports remain visible.
-        if (
-            source[cursor] == "/"
-            and not source.startswith("//", cursor)
-            and not source.startswith("/*", cursor)
-        ):
-            end = regex_end(cursor, hash_count=0)
-            if end != cursor:
-                blank(cursor, end)
-                cursor = end
-                continue
-
-        if source.startswith("//", cursor):
-            end = source.find("\n", cursor + 2)
-            blank(cursor, length if end < 0 else end)
-            cursor = length if end < 0 else end
-            continue
-
-        if source.startswith("/*", cursor):
-            end = cursor + 2
-            depth = 1
-            while end < length and depth:
-                if source.startswith("/*", end):
-                    depth += 1
-                    end += 2
-                elif source.startswith("*/", end):
-                    depth -= 1
-                    end += 2
-                else:
-                    end += 1
-            blank(cursor, end)
-            cursor = end
-            continue
-
-        if source[cursor] == '"' or source[cursor] == "#":
-            end = string_end(cursor)
-            if end != cursor:
-                blank(cursor, end)
-                cursor = end
-                continue
-
-        cursor += 1
-
-    return "".join(output)
-
-
-def _swift_identifier_tokens(source: str) -> list[tuple[str, int, bool]]:
-    """Return ASCII identifier tokens, offsets, and escaped-name markers."""
-
-    tokens: list[tuple[str, int, bool]] = []
-    cursor = 0
-    while cursor < len(source):
-        if source[cursor] == "`":
-            end = source.find("`", cursor + 1)
-            if end < 0:
-                break
-            tokens.append((source[cursor + 1 : end], cursor, True))
-            cursor = end + 1
-            continue
-
-        match = SWIFT_IDENTIFIER.match(source, cursor)
-        if match:
-            tokens.append((match.group(0), cursor, False))
-            cursor = match.end()
-        else:
-            cursor += 1
-    return tokens
-
-
-def _find_native_ui_import(source: str) -> tuple[str, int] | None:
-    """Find a native UI module imported by any valid import-token spelling."""
-
-    tokens = _swift_identifier_tokens(_strip_swift_noise(source))
-    for index, (token, offset, escaped) in enumerate(tokens):
-        if token != "import" or escaped or index + 1 >= len(tokens):
-            continue
-        module_index = index + 1
-        kind, _, kind_escaped = tokens[module_index]
-        if kind in IMPORT_KINDS and not kind_escaped:
-            module_index += 1
-        if module_index < len(tokens):
-            module = tokens[module_index][0]
-            if module in NATIVE_UI_MODULES:
-                return module, offset
-    return None
 
 
 NATIVE_UI_MANIFEST = re.compile(
@@ -315,6 +116,32 @@ def _authored_files() -> list[Path]:
             continue
         files.extend(path for path in root.rglob("*") if path.is_file())
     return sorted(set(files))
+
+
+def _swift_import_declarations(path: Path) -> tuple[list[tuple[str, str]], str | None]:
+    """Ask Swift's parser for import declarations and return module/range pairs."""
+
+    try:
+        result = subprocess.run(
+            ["swiftc", "-frontend", "-dump-parse", str(path)],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as error:
+        return [], f"unable to execute swiftc -frontend -dump-parse: {error}"
+
+    if result.returncode != 0:
+        diagnostics = (result.stderr or result.stdout).strip()
+        return [], f"exit {result.returncode}: {diagnostics}"
+
+    declarations: list[tuple[str, str]] = []
+    for line in result.stdout.splitlines():
+        match = IMPORT_DECL.search(line)
+        if match:
+            declarations.append((match.group("module"), match.group("range")))
+    return declarations, None
 
 
 def _dependency_names(raw: list[dict[str, Any]]) -> tuple[str, ...] | None:
@@ -388,13 +215,19 @@ def _check_authored_text(errors: list[str]) -> None:
                 break
 
         if path.suffix == ".swift":
-            native_import = _find_native_ui_import(text)
-            if native_import:
-                module, offset = native_import
-                line = text.count("\n", 0, offset) + 1
+            imports, parser_error = _swift_import_declarations(path)
+            if parser_error:
+                errors.append(f"Swift parser failed for {relative}: {parser_error}")
+                continue
+            for module_name, source_range in imports:
+                module = module_name.split(".", 1)[0]
+                if module not in NATIVE_UI_MODULES:
+                    continue
+                line_match = re.search(r":(\d+):\d+\s+-", source_range)
+                line = line_match.group(1) if line_match else "?"
                 errors.append(
                     f"native UI import is outside the current no-UI boundary in "
-                    f"{relative}:{line} (module {module!r})"
+                    f"{relative}:{line} (module {module_name!r}; range {source_range})"
                 )
 
 
