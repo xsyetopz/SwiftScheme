@@ -166,6 +166,52 @@ struct R5RSMacroDefinitionTests {
     #expect(result.written == "9")
   }
 
+  @Test("letrec initializer closures retain the enclosing binding cells")
+  func letrecInitializerLexicalRegion() throws {
+    let interpreter = Interpreter(output: { _ in })
+    let result = try interpreter.evaluate(
+      "(letrec ((x (lambda () x)) (get (lambda () x))) "
+        + "(define x 2) (procedure? (get)))"
+    )
+    #expect(result.written == "#t")
+  }
+
+  @Test("macro-generated duplicate internal definitions are rejected")
+  func macroGeneratedDuplicateDefinitions() {
+    expectR5RSyntaxError(
+      """
+      (define-syntax def
+        (syntax-rules () ((_ x v) (define x v))))
+      ((lambda () (def x 1) (def x 2) x))
+      """,
+      "macro/macro duplicate internal definitions"
+    )
+  }
+
+  @Test("raw and macro-generated duplicate internal definitions are rejected")
+  func rawAndMacroDuplicateDefinitions() {
+    expectR5RSyntaxError(
+      """
+      (define-syntax def
+        (syntax-rules () ((_ x v) (define x v))))
+      ((lambda () (define x 1) (def x 2) x))
+      """,
+      "raw/macro duplicate internal definitions"
+    )
+  }
+
+  @Test("macro-generated begin duplicates are not treated as raw forms")
+  func macroGeneratedBeginDuplicateDefinitions() {
+    expectR5RSyntaxError(
+      """
+      (define-syntax defs
+        (syntax-rules () ((_ x v) (begin (define x v)))))
+      ((lambda () (define x 1) (defs x 2) x))
+      """,
+      "raw/macro begin duplicate internal definitions"
+    )
+  }
+
   @Test("begin splices an initial definition group")
   func beginDefinitionGroup() throws {
     let interpreter = Interpreter(output: { _ in })

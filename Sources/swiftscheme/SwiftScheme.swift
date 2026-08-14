@@ -1607,7 +1607,9 @@ private indirect enum Continuation {
   case defineFrame(String, SchemeEnvironment, Continuation)
   case operatorFrame([Value], SchemeEnvironment, Continuation)
   case operandFrame(Value, [Value], [Value], SchemeEnvironment, Continuation)
-  case letrecFrame([(String, Value)], Int, SchemeEnvironment, [Value], Continuation)
+  case letrecFrame(
+    [(String, Value)], Int, SchemeEnvironment, [Value], SchemeEnvironment, Continuation
+  )
   case callValuesFrame(Value, Continuation)
   case promiseFrame(Promise, Continuation)
   case windBeforeFrame(Value, Value, Wind, Continuation)
@@ -1678,10 +1680,11 @@ private func traceContinuation(_ continuation: Continuation, _ visit: (any Schem
     traceValues(b, visit)
     visit(environment)
     traceContinuation(next, visit)
-  case .letrecFrame(let bindings, _, let environment, let values, let next):
+  case .letrecFrame(let bindings, _, let environment, let values, let bodyEnvironment, let next):
     bindings.forEach { traceValue($0.1, visit) }
     visit(environment)
     traceValues(values, visit)
+    visit(bodyEnvironment)
     traceContinuation(next, visit)
   case .callValuesFrame(let value, let next):
     traceValue(value, visit)
@@ -1896,29 +1899,41 @@ public final class Interpreter {
     var names = Set<String>()
     let raw = try leadingBodyForms(body, in: environment)
     try prebindDefinitions(raw, in: environment, names: &names)
+    let rawNames = names
 
     // A leading macro may expand to a definition. Expand only after raw
     // definition names are installed so later forms cannot invoke an outer
     // macro with a name that is local to this body.
-    _ = try expandedBodyWithPrebinding(body, in: environment, names: &names)
+    _ = try expandedBodyWithPrebinding(
+      body, in: environment, names: &names, rawNames: rawNames
+    )
   }
 
   private func expandedBodyWithPrebinding(
-    _ body: [Value], in environment: SchemeEnvironment, names: inout Set<String>
+    _ body: [Value], in environment: SchemeEnvironment, names: inout Set<String>,
+    rawNames: Set<String>
   ) throws -> [Value] {
-    var pending = body
+    var pending = body.map { ($0, true) }
     var expanded: [Value] = []
     var leading = true
     while !pending.isEmpty {
-      let form = try expandMacros(pending.removeFirst(), in: environment)
+      let (rawForm, isRaw) = pending.removeFirst()
+      let rawWasDefinition = isDefinitionForm(rawForm, "define", in: environment)
+      let form = try expandMacros(rawForm, in: environment)
       if isCoreForm(form, "begin", in: environment) {
         let elements = try array(from: form, context: "begin")
-        pending.insert(contentsOf: elements.dropFirst(), at: 0)
+        let literalRawBegin = isRaw && isCoreForm(rawForm, "begin", in: environment)
+        pending.insert(
+          contentsOf: elements.dropFirst().map { ($0, literalRawBegin) }, at: 0
+        )
         continue
       }
       expanded.append(form)
       if leading, isDefinitionForm(form, "define", in: environment) {
-        try prebindDefinitions([form], in: environment, names: &names, allowExisting: true)
+        try prebindDefinitions(
+          [form], in: environment, names: &names,
+          allowExistingNames: isRaw && rawWasDefinition ? rawNames : []
+        )
       } else if !isDefinitionForm(form, "define-syntax", in: environment) {
         leading = false
       }
@@ -1928,7 +1943,7 @@ public final class Interpreter {
 
   private func prebindDefinitions(
     _ forms: [Value], in environment: SchemeEnvironment, names: inout Set<String>,
-    allowExisting: Bool = false
+    allowExistingNames: Set<String> = []
   ) throws {
     for form in forms {
       guard isDefinitionForm(form, "define", in: environment),
@@ -1948,7 +1963,7 @@ public final class Interpreter {
         throw SchemeError.syntax("cannot define syntactic keyword \(name)")
       }
       if names.contains(name) {
-        guard allowExisting else {
+        guard allowExistingNames.contains(name) else {
           throw SchemeError.syntax("duplicate internal definition \(name)")
         }
         continue
@@ -2136,18 +2151,20 @@ public final class Interpreter {
               try ensureDistinct(entries, "letrec")
               let local = SchemeEnvironment(parent: environment)
               for (name, _) in entries { local.define(name, .undefined) }
+              let bodyEnvironment = SchemeEnvironment(parent: local)
               let body = Array(form.dropFirst(2))
-              try prepareInternalDefinitions(body, in: local)
-              try validateBody(body, context: "letrec", in: local)
+              try prepareInternalDefinitions(body, in: bodyEnvironment)
+              try validateBody(body, context: "letrec", in: bodyEnvironment)
               if entries.isEmpty {
-                continuation = .beginFrame(Array(form.dropFirst(3)), local, continuation)
-                control = .expression(form[2], local)
+                continuation = .beginFrame(Array(form.dropFirst(3)), bodyEnvironment, continuation)
+                control = .expression(form[2], bodyEnvironment)
               } else {
                 continuation = .letrecFrame(
                   entries,
                   0,
                   local,
                   Array(form.dropFirst(2)),
+                  bodyEnvironment,
                   continuation
                 )
                 control = .expression(entries[0].1, local)
@@ -2256,15 +2273,19 @@ public final class Interpreter {
             )
             control = .expression(rest[0], environment)
           }
-        case .letrecFrame(let entries, let index, let environment, let body, let next):
+        case .letrecFrame(
+          let entries, let index, let environment, let body, let bodyEnvironment, let next
+        ):
           try environment.set(entries[index].0, try one(values, "letrec initializer"))
           let following = index + 1
           if following < entries.count {
-            continuation = .letrecFrame(entries, following, environment, body, next)
+            continuation = .letrecFrame(
+              entries, following, environment, body, bodyEnvironment, next
+            )
             control = .expression(entries[following].1, environment)
           } else {
-            continuation = .beginFrame(Array(body.dropFirst()), environment, next)
-            control = .expression(body[0], environment)
+            continuation = .beginFrame(Array(body.dropFirst()), bodyEnvironment, next)
+            control = .expression(body[0], bodyEnvironment)
           }
         case .callValuesFrame(let consumer, let next):
           continuation = next
