@@ -929,7 +929,7 @@ private enum Writer {
       if value == " " { return "#\\space" }
       if value == "\n" { return "#\\newline" }
       return "#\\\(value)"
-    case .symbol(let name): return name
+    case .symbol(let name): return symbolSpelling(name)
     case .string(let value):
       return "\""
         + value.string.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(
@@ -977,6 +977,17 @@ private enum Writer {
 private func makeList<S: Sequence>(_ values: S, tail: Value = .empty) -> Value
 where S.Element == Value { Array(values).reversed().reduce(tail) { .pair(Pair($1, $0)) } }
 
+private let nonstandardSymbolPrefix = "\u{1}"
+
+private func symbolToken(_ spelling: String) -> String {
+  let canonical = spelling.lowercased()
+  return spelling == canonical ? canonical : nonstandardSymbolPrefix + spelling
+}
+
+private func symbolSpelling(_ token: String) -> String {
+  token.hasPrefix(nonstandardSymbolPrefix) ? String(token.dropFirst()) : token
+}
+
 private func markLiteral(_ value: Value, _ seen: inout Set<ObjectIdentifier>) {
   switch value {
   case .pair(let pair):
@@ -1011,14 +1022,6 @@ private func array(from list: Value, context: String = "list") throws -> [Value]
 private func identifier(_ value: Value, _ context: String) throws -> String {
   guard case .symbol(let name) = value else {
     throw SchemeError.syntax("\(context) requires an identifier")
-  }
-  return name
-}
-
-private func variableIdentifier(_ value: Value, _ context: String) throws -> String {
-  let name = try identifier(value, context)
-  guard !isSyntacticKeyword(name) else {
-    throw SchemeError.syntax("cannot bind syntactic keyword \(name)")
   }
   return name
 }
@@ -1538,6 +1541,35 @@ private func isSyntacticKeyword(_ name: String) -> Bool {
   ].contains(name)
 }
 
+private let r5rsReportProcedureNames: Set<String> = [
+  "eq?", "eqv?", "equal?", "number?", "complex?", "real?", "rational?", "integer?", "exact?",
+  "inexact?", "=", "<", ">", "<=", ">=", "zero?", "positive?", "negative?", "odd?", "even?",
+  "max", "min", "+", "*", "-", "/", "abs", "quotient", "remainder", "modulo", "gcd", "lcm",
+  "numerator", "denominator", "floor", "ceiling", "truncate", "round", "rationalize", "exp", "log",
+  "sin", "cos", "tan", "asin", "acos", "atan", "sqrt", "expt", "make-rectangular", "make-polar",
+  "real-part", "imag-part", "magnitude", "angle", "exact->inexact", "inexact->exact", "number->string",
+  "string->number", "not", "boolean?", "pair?", "cons", "car", "cdr", "set-car!", "set-cdr!",
+  "caar", "cadr", "cdar", "cddr", "caaar", "caadr", "cadar", "caddr", "cdaar", "cdadr", "cddar",
+  "caaaar", "caaadr", "caadar", "caaddr", "cadaar", "cadadr", "caddar", "cadddr", "cdaaar",
+  "cdaadr", "cdadar", "cdaddr", "cddaar", "cddadr", "cdddar", "cddddr", "null?", "list?", "list",
+  "length", "append", "reverse", "list-tail", "list-ref", "memq", "memv", "member", "assq", "assv",
+  "assoc", "symbol?", "symbol->string", "string->symbol", "char?", "char=?", "char<?", "char>?",
+  "char<=?", "char>=?", "char-ci=?", "char-ci<?", "char-ci>?", "char-ci<=?", "char-ci>=?",
+  "char-alphabetic?", "char-numeric?", "char-whitespace?", "char-upper-case?", "char-lower-case?",
+  "char-upcase", "char-downcase", "char->integer", "integer->char", "string?", "make-string", "string",
+  "string-length", "string-ref", "string-set!", "substring", "string-append", "string->list", "list->string",
+  "string-copy", "string-fill!", "string=?", "string<?", "string>?", "string<=?", "string>=?",
+  "string-ci=?", "string-ci<?", "string-ci>?", "string-ci<=?", "string-ci>=?", "vector?", "make-vector",
+  "vector", "vector-length", "vector-ref", "vector-set!", "vector->list", "list->vector", "vector-fill!",
+  "procedure?", "apply", "call-with-current-continuation", "map", "for-each", "values", "call-with-values",
+  "dynamic-wind", "force", "eval", "scheme-report-environment", "null-environment", "input-port?",
+  "output-port?", "current-input-port", "current-output-port", "call-with-input-file", "call-with-output-file",
+  "open-input-file", "open-output-file", "close-input-port", "close-output-port", "read", "read-char",
+  "peek-char", "eof-object?", "char-ready?", "write", "display", "newline", "write-char",
+  // Supported R5RS optional procedures included by scheme-report-environment.
+  "interaction-environment", "with-input-from-file", "with-output-to-file", "load"
+]
+
 private final class Wind: SchemeHeapNode {
   let id: Int
   var before: Value
@@ -1782,16 +1814,34 @@ public final class Interpreter {
     }
   }
 
-  private func validateBody(_ body: [Value], context: String) throws {
+  private func expandMacros(_ rawExpression: Value, in environment: SchemeEnvironment) throws -> Value {
+    var expression = rawExpression
+    while case .pair(let pair) = expression, case .symbol(let head) = pair.car,
+      let transformer = environment.macro(head)
+    { expression = try transformer.expand(expression, in: environment, serial: &macroSerial) }
+    return expression
+  }
+
+  private func expandedBody(_ body: [Value], in environment: SchemeEnvironment) throws -> [Value] {
     var pending = body
-    var sawExpression = false
+    var expanded: [Value] = []
     while !pending.isEmpty {
-      let form = pending.removeFirst()
+      let form = try expandMacros(pending.removeFirst(), in: environment)
       if case .pair(let pair) = form, isSymbol(pair.car, "begin") {
-        let nested = try array(from: pair.cdr, context: "begin")
-        pending.insert(contentsOf: nested, at: 0)
-        continue
+        pending.insert(contentsOf: try array(from: pair.cdr, context: "begin"), at: 0)
+      } else {
+        expanded.append(form)
       }
+    }
+    return expanded
+  }
+
+  private func validateBody(
+    _ body: [Value], context: String, in environment: SchemeEnvironment
+  ) throws {
+    let expanded = try expandedBody(body, in: environment)
+    var sawExpression = false
+    for form in expanded {
       if case .pair(let pair) = form, case .symbol(let name) = pair.car,
         name == "define" || name == "define-syntax"
       {
@@ -1811,14 +1861,9 @@ public final class Interpreter {
   }
 
   private func prepareInternalDefinitions(_ body: [Value], in environment: SchemeEnvironment) throws {
-    var pending = body
+    let expanded = try expandedBody(body, in: environment)
     var names = Set<String>()
-    while !pending.isEmpty {
-      let form = pending.removeFirst()
-      if case .pair(let pair) = form, isSymbol(pair.car, "begin") {
-        pending.insert(contentsOf: try array(from: pair.cdr, context: "begin"), at: 0)
-        continue
-      }
+    for form in expanded {
       guard case .pair(let pair) = form, isSymbol(pair.car, "define") else { break }
       let definition = try array(from: .pair(pair), context: "define")
       guard definition.count >= 3 else { throw SchemeError.syntax("define requires name and value") }
@@ -1871,17 +1916,14 @@ public final class Interpreter {
       switch control {
       case .expression(let rawExpression, let environment):
         recordSymbols(rawExpression, in: environment)
-        var expression = rawExpression
-        while case .pair(let pair) = expression, case .symbol(let head) = pair.car,
-          let transformer = environment.macro(head)
-        { expression = try transformer.expand(expression, in: environment, serial: &macroSerial) }
+        let expression = try expandMacros(rawExpression, in: environment)
         switch expression {
         case .symbol(let name): control = .values([try environment.get(name)])
         case .undefined: throw SchemeError.unbound("undefined value")
         case .pair:
           let form = try array(from: expression, context: "expression")
           guard !form.isEmpty else { throw SchemeError.syntax("empty application") }
-          if case .symbol(let keyword) = form[0] {
+          if case .symbol(let keyword) = form[0], environment.cell(keyword) == nil {
             switch keyword {
             case "quote":
               try require(form, 2, "quote")
@@ -1914,11 +1956,15 @@ public final class Interpreter {
               guard form.count >= 3 else {
                 throw SchemeError.syntax("lambda requires formals and body")
               }
-              try validateBody(Array(form.dropFirst(2)), context: "lambda")
+              let formals = try parseFormals(form[1])
+              let validation = SchemeEnvironment(parent: environment)
+              for name in formals.fixed { validation.define(name, .undefined) }
+              if let rest = formals.rest { validation.define(rest, .undefined) }
+              try validateBody(Array(form.dropFirst(2)), context: "lambda", in: validation)
               control = .values([
                 .procedure(
                   Procedure(
-                    .closure(try parseFormals(form[1]), Array(form.dropFirst(2)), environment)
+                    .closure(formals, Array(form.dropFirst(2)), environment)
                   )
                 )
               ])
@@ -1943,10 +1989,15 @@ public final class Interpreter {
                 guard !isSyntacticKeyword(name) else {
                   throw SchemeError.syntax("cannot define syntactic keyword \(name)")
                 }
-                try validateBody(Array(form.dropFirst(2)), context: "define")
+                let formals = try parseFormals(signature.cdr)
+                let validation = SchemeEnvironment(parent: environment)
+                validation.define(name, .undefined)
+                for formal in formals.fixed { validation.define(formal, .undefined) }
+                if let rest = formals.rest { validation.define(rest, .undefined) }
+                try validateBody(Array(form.dropFirst(2)), context: "define", in: validation)
                 let procedure = Value.procedure(
                   Procedure(
-                    .closure(try parseFormals(signature.cdr), Array(form.dropFirst(2)), environment)
+                    .closure(formals, Array(form.dropFirst(2)), environment)
                   )
                 )
                 if !environment.fillPlaceholder(name, procedure) {
@@ -1973,14 +2024,8 @@ public final class Interpreter {
               guard form.count >= 3 else {
                 throw SchemeError.syntax("\(keyword) requires bindings and body")
               }
-              try validateBody(Array(form.dropFirst(2)), context: keyword)
               let definitions = try syntaxBindings(form[1], keyword)
               try ensureDistinct(definitions, "\(keyword) binding")
-              for (name, _) in definitions {
-                guard !isSyntacticKeyword(name) else {
-                  throw SchemeError.syntax("cannot bind syntactic keyword \(name)")
-                }
-              }
               let body = Array(form.dropFirst(2))
               let local = SchemeEnvironment(parent: environment)
               let definitionEnvironment = keyword == "letrec-syntax" ? local : environment
@@ -1991,15 +2036,14 @@ public final class Interpreter {
                   definition: definitionEnvironment
                 )
               }
+              try validateBody(body, context: keyword, in: local)
               try prepareInternalDefinitions(body, in: local)
               continuation = .beginFrame(Array(body.dropFirst()), local, continuation)
               control = .expression(body[0], local)
               continue
             case "set!":
               try require(form, 3, "set!")
-              continuation = .setFrame(
-                try variableIdentifier(form[1], "set!"), environment, continuation
-              )
+              continuation = .setFrame(try identifier(form[1], "set!"), environment, continuation)
               control = .expression(form[2], environment)
               continue
             case "let":
@@ -2014,9 +2058,9 @@ public final class Interpreter {
               }
               let entries = try bindings(form[1], "letrec")
               try ensureDistinct(entries, "letrec")
-              try validateBody(Array(form.dropFirst(2)), context: "letrec")
               let local = SchemeEnvironment(parent: environment)
               for (name, _) in entries { local.define(name, .undefined) }
+              try validateBody(Array(form.dropFirst(2)), context: "letrec", in: local)
               if entries.isEmpty {
                 let body = Array(form.dropFirst(2))
                 try prepareInternalDefinitions(body, in: local)
@@ -2240,12 +2284,12 @@ public final class Interpreter {
         case .primitive(_, let function): control = .values(try function(arguments))
         case .closure(let formals, let body, let captured):
           try checkArity(arguments, formals)
-          try validateBody(body, context: "procedure body")
           let local = SchemeEnvironment(parent: captured)
           for (name, value) in zip(formals.fixed, arguments) { local.define(name, value) }
           if let rest = formals.rest {
             local.define(rest, makeList(arguments.dropFirst(formals.fixed.count)))
           }
+          try validateBody(body, context: "procedure body", in: local)
           try prepareInternalDefinitions(body, in: local)
           guard let first = body.first else { throw SchemeError.syntax("empty procedure body") }
           continuation = .beginFrame(Array(body.dropFirst()), local, continuation)
@@ -2482,7 +2526,7 @@ public final class Interpreter {
     var rest: String?
     var cursor = value
     if case .symbol(let name) = cursor {
-      rest = try variableIdentifier(.symbol(name), "lambda")
+      rest = name
       cursor = .empty
     }
     var seen = Set<ObjectIdentifier>()
@@ -2490,11 +2534,11 @@ public final class Interpreter {
       guard seen.insert(ObjectIdentifier(pair)).inserted else {
         throw SchemeError.syntax("cyclic formal list")
       }
-      fixed.append(try variableIdentifier(pair.car, "lambda"))
+      fixed.append(try identifier(pair.car, "lambda"))
       cursor = pair.cdr
     }
     if case .symbol(let name) = cursor {
-      rest = try variableIdentifier(.symbol(name), "lambda")
+      rest = name
     } else if case .empty = cursor {
     } else {
       throw SchemeError.syntax("invalid lambda formals")
@@ -2522,7 +2566,7 @@ public final class Interpreter {
       guard item.count == 2 else {
         throw SchemeError.syntax("\(context) binding requires name and initializer")
       }
-      return (try variableIdentifier(item[0], context), item[1])
+      return (try identifier(item[0], context), item[1])
     }
   }
 
@@ -2544,7 +2588,7 @@ public final class Interpreter {
     guard form.count >= 3 else { throw SchemeError.syntax("let requires bindings and body") }
     if case .symbol(let rawName) = form[1] {
       guard form.count >= 4 else { throw SchemeError.syntax("named let requires body") }
-      let name = try variableIdentifier(.symbol(rawName), "named let")
+      let name = rawName
       let entries = try bindings(form[2], "named let")
       try ensureDistinct(entries, "named let")
       let lambda = makeList(
@@ -2672,7 +2716,7 @@ public final class Interpreter {
     guard !test.isEmpty else { throw SchemeError.syntax("empty do test") }
     macroSerial += 1
     let loop = "do#\(macroSerial)"
-    let names = try specs.map { try variableIdentifier($0[0], "do") }
+    let names = try specs.map { try identifier($0[0], "do") }
     let steps = zip(specs, names).map { $0.0.count == 3 ? $0.0[2] : .symbol($0.1) }
     let done =
       test.count == 1 ? .unspecified : makeList([.symbol("begin")] + Array(test.dropFirst()))
@@ -3219,14 +3263,14 @@ public final class Interpreter {
     primitive("symbol->string", in: env) { args in
       try require(args, 1, "symbol->string")
       guard case .symbol(let s) = args[0] else { throw SchemeError.type("expected symbol") }
-      return .string(SchemeString(env.spelling(s) ?? s))
+      let string = SchemeString(symbolSpelling(s))
+      string.isLiteral = true
+      return .string(string)
     }
     primitive("string->symbol", in: env) { args in
       try require(args, 1, "string->symbol")
       let spelling = try schemeString(args[0], "string->symbol").string
-      let canonical = spelling.lowercased()
-      env.symbolSpellings[canonical] = spelling
-      return .symbol(canonical)
+      return .symbol(symbolToken(spelling))
     }
     primitive("char->integer", in: env) {
       try require($0, 1, "char->integer")
@@ -3433,7 +3477,9 @@ public final class Interpreter {
         throw SchemeError.numeric("only report version 5 is supported")
       }
       let copy = SchemeEnvironment(definitionPolicy: .fixed)
-      for (name, cell) in env.values { copy.define(name, cell.value) }
+      for name in r5rsReportProcedureNames {
+        if let cell = env.values[name] { copy.define(name, cell.value) }
+      }
       return .environment(copy)
     }
     primitive("null-environment", in: env) { args in

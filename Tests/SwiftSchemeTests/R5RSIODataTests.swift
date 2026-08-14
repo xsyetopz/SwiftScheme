@@ -30,6 +30,20 @@ struct R5RSIODataTests {
     expectIOError("(string-fill! \"abc\" #\\z)", "literal string fill")
     expectIOError("(vector-set! '#(1 2) 0 3)", "literal vector")
     expectIOError("(vector-fill! '#(1 2) 3)", "literal vector fill")
+    expectIOError(
+      "(let ((name (symbol->string 'immutable))) (string-set! name 0 #\\x))",
+      "symbol->string result"
+    )
+  }
+
+  @Test("symbols preserve standard case and string-created spelling")
+  func symbolConversion() throws {
+    let result = try evaluateIO(
+      "(list (symbol->string 'Martin) (symbol->string (string->symbol \"bitBlt\")) "
+        + "(eq? 'bitBlt (string->symbol \"bitBlt\")) "
+        + "(eq? (string->symbol \"bitBlt\") (string->symbol \"bitBlt\")))"
+    )
+    #expect(result.written == "(\"martin\" \"bitBlt\" #f #t)")
   }
 
   @Test("read-created pairs, strings, and vectors remain mutable")

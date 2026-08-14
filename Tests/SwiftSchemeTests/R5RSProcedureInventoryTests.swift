@@ -31,18 +31,32 @@ struct R5RSProcedureInventoryTests {
       "string-ci<?", "string-ci>?", "string-ci<=?", "string-ci>=?", "vector?", "make-vector", "vector",
       "vector-length", "vector-ref", "vector-set!", "vector->list", "list->vector", "vector-fill!",
       // §6.4–§6.6
-      "procedure?", "call-with-current-continuation", "apply", "map", "for-each", "force", "eval",
+      "procedure?", "call-with-current-continuation", "apply", "map", "for-each", "values", "force", "eval",
       "call-with-values", "dynamic-wind", "scheme-report-environment", "null-environment",
-      "interaction-environment", "call-with-input-file", "call-with-output-file", "open-input-file",
+      "input-port?", "output-port?", "call-with-input-file", "call-with-output-file", "open-input-file",
       "open-output-file", "close-input-port", "close-output-port", "current-input-port",
       "current-output-port", "read", "read-char", "peek-char", "eof-object?", "char-ready?", "write",
-      "display", "newline", "write-char", "load"
+      "display", "newline", "write-char"
     ]
     let interpreter = Interpreter(output: { _ in })
     for name in Set(names) {
       #expect(
         try interpreter.evaluate("(procedure? \(name))").written == "#t",
         "missing required procedure binding: \(name)"
+      )
+    }
+  }
+
+  @Test("supported optional procedure names are bound separately")
+  func supportedOptionalProcedureBindings() throws {
+    let names = [
+      "interaction-environment", "with-input-from-file", "with-output-to-file", "load"
+    ]
+    let interpreter = Interpreter(output: { _ in })
+    for name in names {
+      #expect(
+        try interpreter.evaluate("(procedure? \(name))").written == "#t",
+        "missing supported optional procedure binding: \(name)"
       )
     }
   }
