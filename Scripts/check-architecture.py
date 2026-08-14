@@ -46,20 +46,152 @@ FORBIDDEN_TEXT = (
     re.compile(r"(?:^|[\\/])Plugins(?:[\\/]|$)"),
     re.compile(r"(?:^|[\\/])Sources[\\/]XCTest(?:[\\/]|$)"),
 )
-# Swift permits declaration attributes before imports and an import-kind before
-# a module member (for example ``@preconcurrency import SwiftUI`` or
-# ``import struct SwiftUI.Text``). Keep the match anchored to a declaration
-# line and require the complete module root so identifiers such as
-# ``SwiftUICompatibility`` are not false positives.
-NATIVE_UI_IMPORT = re.compile(
-    r"^[ \t]*(?:(?:@[A-Za-z_][A-Za-z0-9_]*"
-    r"(?:[ \t]*\([^()\n]*\))?)[ \t]*(?:\n[ \t]*)?)*"
-    r"import[ \t]+"
-    r"(?:(?:class|enum|func|let|protocol|struct|typealias|var)[ \t]+)?"
-    r"(?P<module>SwiftUI|UIKit|AppKit|WatchKit|TVMLKit|RealityKit|SceneKit|SpriteKit)"
-    r"(?=\.|\b)",
-    re.MULTILINE,
+NATIVE_UI_MODULES = frozenset(
+    {
+        "SwiftUI",
+        "UIKit",
+        "AppKit",
+        "WatchKit",
+        "TVMLKit",
+        "RealityKit",
+        "SceneKit",
+        "SpriteKit",
+    }
 )
+IMPORT_KINDS = frozenset(
+    {"class", "enum", "func", "let", "protocol", "struct", "typealias", "var"}
+)
+SWIFT_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _strip_swift_noise(source: str) -> str:
+    """Blank Swift comments and string literals while preserving newlines.
+
+    The architecture gate only needs import tokens, not a complete Swift
+    parser.  Removing comments and strings first prevents prose, fixtures, and
+    test descriptions from looking like imports.  Block comments are nested in
+    Swift, so their depth is tracked.  Raw and multiline string delimiters are
+    recognized before ordinary quotes.
+    """
+
+    output = list(source)
+    length = len(source)
+
+    def blank(start: int, end: int) -> None:
+        for index in range(start, end):
+            if source[index] not in "\r\n":
+                output[index] = " "
+
+    def string_end(start: int) -> int:
+        hash_count = 0
+        cursor = start
+        while cursor < length and source[cursor] == "#":
+            hash_count += 1
+            cursor += 1
+        if cursor >= length or source[cursor] != '"':
+            return start
+
+        multiline = source.startswith('"""', cursor)
+        opening_length = 3 if multiline else 1
+        content_start = cursor + opening_length
+        if hash_count:
+            closing = '"' * (3 if multiline else 1) + ("#" * hash_count)
+            closing_start = source.find(closing, content_start)
+            return length if closing_start < 0 else closing_start + len(closing)
+
+        # Ordinary strings honor backslash escapes.  This also handles an
+        # escaped triple quote in a multiline string without treating it as
+        # the closing delimiter.
+        cursor = content_start
+        while cursor < length:
+            if source[cursor] == "\\":
+                cursor += 2
+                continue
+            if multiline:
+                if source.startswith('"""', cursor):
+                    return cursor + 3
+            elif source[cursor] == '"':
+                return cursor + 1
+            cursor += 1
+        return length
+
+    cursor = 0
+    while cursor < length:
+        if source.startswith("//", cursor):
+            end = source.find("\n", cursor + 2)
+            blank(cursor, length if end < 0 else end)
+            cursor = length if end < 0 else end
+            continue
+
+        if source.startswith("/*", cursor):
+            end = cursor + 2
+            depth = 1
+            while end < length and depth:
+                if source.startswith("/*", end):
+                    depth += 1
+                    end += 2
+                elif source.startswith("*/", end):
+                    depth -= 1
+                    end += 2
+                else:
+                    end += 1
+            blank(cursor, end)
+            cursor = end
+            continue
+
+        if source[cursor] == '"' or source[cursor] == "#":
+            end = string_end(cursor)
+            if end != cursor:
+                blank(cursor, end)
+                cursor = end
+                continue
+
+        cursor += 1
+
+    return "".join(output)
+
+
+def _swift_identifier_tokens(source: str) -> list[tuple[str, int, bool]]:
+    """Return ASCII identifier tokens, offsets, and escaped-name markers."""
+
+    tokens: list[tuple[str, int, bool]] = []
+    cursor = 0
+    while cursor < len(source):
+        if source[cursor] == "`":
+            end = source.find("`", cursor + 1)
+            if end < 0:
+                break
+            tokens.append((source[cursor + 1 : end], cursor, True))
+            cursor = end + 1
+            continue
+
+        match = SWIFT_IDENTIFIER.match(source, cursor)
+        if match:
+            tokens.append((match.group(0), cursor, False))
+            cursor = match.end()
+        else:
+            cursor += 1
+    return tokens
+
+
+def _find_native_ui_import(source: str) -> tuple[str, int] | None:
+    """Find a native UI module imported by any valid import-token spelling."""
+
+    tokens = _swift_identifier_tokens(_strip_swift_noise(source))
+    for index, (token, offset, escaped) in enumerate(tokens):
+        if token != "import" or escaped or index + 1 >= len(tokens):
+            continue
+        module_index = index + 1
+        kind, _, kind_escaped = tokens[module_index]
+        if kind in IMPORT_KINDS and not kind_escaped:
+            module_index += 1
+        if module_index < len(tokens):
+            module = tokens[module_index][0]
+            if module in NATIVE_UI_MODULES:
+                return module, offset
+    return None
+
+
 NATIVE_UI_MANIFEST = re.compile(
     r"\b(?:SwiftUI|UIKit|AppKit|WatchKit|TVMLKit|RealityKit|SceneKit|SpriteKit)\b"
 )
@@ -184,12 +316,13 @@ def _check_authored_text(errors: list[str]) -> None:
                 break
 
         if path.suffix == ".swift":
-            match = NATIVE_UI_IMPORT.search(text)
-            if match:
-                line = text.count("\n", 0, match.start()) + 1
+            native_import = _find_native_ui_import(text)
+            if native_import:
+                module, offset = native_import
+                line = text.count("\n", 0, offset) + 1
                 errors.append(
                     f"native UI import is outside the current no-UI boundary in "
-                    f"{relative}:{line} ({match.group(0).strip()!r})"
+                    f"{relative}:{line} (module {module!r})"
                 )
 
 

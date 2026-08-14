@@ -21,9 +21,11 @@ architecture decision and review responsibility.
 
 ## Evidence
 
-The current snapshot below is anchored to final architecture candidate
+The current snapshot below is anchored to predecessor architecture candidate
 `22b9a62` (reproducible topology and HIG boundary gate, descended from
-`e89c237`) on 2026-08-14. Historical
+`e89c237`) on 2026-08-14; every `22b9a62` label in this section identifies
+that frozen predecessor. The sanitizer repair is an additive successor awaiting
+freeze, after which this anchor must move to its final commit. Historical
 observations are explicitly labeled and are retained only to explain the
 migration; they are not current package evidence.
 
