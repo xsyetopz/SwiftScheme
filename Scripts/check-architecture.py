@@ -115,33 +115,6 @@ def _strip_swift_noise(source: str) -> str:
             cursor += 1
         return length
 
-    def regex_start(start: int) -> bool:
-        """Return whether a bare slash at `start` can open a regex literal."""
-
-        if (
-            source[start] != "/"
-            or source.startswith("//", start)
-            or source.startswith("/*", start)
-        ):
-            return False
-        previous = start - 1
-        had_newline = False
-        while previous >= 0 and output[previous].isspace():
-            had_newline = had_newline or output[previous] in "\r\n"
-            previous -= 1
-        if (
-            previous < 0
-            or had_newline
-            or output[previous] in "([{=,:;!&|?+-*%^~<>"
-        ):
-            return True
-        prefix = "".join(output[: previous + 1])
-        keyword = re.search(r"[A-Za-z_][A-Za-z0-9_]*$", prefix)
-        return bool(
-            keyword
-            and keyword.group(0) in {"case", "in", "return", "throw", "yield"}
-        )
-
     def extended_hash_count(start: int) -> int:
         """Count a valid run of `#` immediately before an extended regex `/`."""
 
@@ -163,6 +136,14 @@ def _strip_swift_noise(source: str) -> str:
                 # preserving the next character also handles escaped pairs.
                 cursor += 2
                 continue
+            if not hash_count and (
+                source.startswith("//", cursor)
+                or source.startswith("/*", cursor)
+            ):
+                # A comment marker after a division slash means this is not a
+                # bare regex pair. Leave both slashes for the normal comment
+                # scanner so prose cannot leak import tokens.
+                return start
             if source.startswith(closing, cursor):
                 end = cursor + len(closing)
                 # An extended delimiter must have exactly the opening hash
@@ -192,7 +173,16 @@ def _strip_swift_noise(source: str) -> str:
             cursor += hash_count
             continue
 
-        if source[cursor] == "/" and regex_start(cursor):
+        # For a non-comment slash, an escaped-aware closing pair on the same
+        # line is enough to classify the span as a bare regex. This deliberate
+        # lexical policy also covers `switch`/closure expression contexts
+        # without growing a keyword table; unmatched/division-only slashes are
+        # left untouched so later imports remain visible.
+        if (
+            source[cursor] == "/"
+            and not source.startswith("//", cursor)
+            and not source.startswith("/*", cursor)
+        ):
             end = regex_end(cursor, hash_count=0)
             if end != cursor:
                 blank(cursor, end)
