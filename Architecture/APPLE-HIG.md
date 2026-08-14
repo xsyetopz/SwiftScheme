@@ -3,8 +3,9 @@
 **Record type:** applicability and future-surface contract (not a UI
 conformance claim)
 **Decision date:** 2026-08-14
-**Current owner:** SwiftScheme architecture documentation; revisit this file
-when a native UI target is proposed.
+**Current owner:** Apple-platform design owner (the owner named in
+`Architecture/ADR-0001-r5rs-runtime-topology.md`); revisit this file when a
+native UI target is proposed.
 
 ## Decision
 
@@ -13,6 +14,11 @@ command-line executables. It has no SwiftUI, UIKit, or AppKit surface, so the
 Human Interface Guidelines (HIG) are not a current implementation or release
 gate for the package. Adding a GUI merely to claim HIG coverage is explicitly
 out of scope.
+
+This is the no-native-UI boundary selected by ADR-0001 Candidate B: keep the
+single library and terminal CLI text-first, and do not add a UI target or make
+the interpreter depend on an Apple UI framework merely for architectural or HIG
+coverage.
 
 If a native surface is approved later, it must be a separately named target
 with an explicit platform and accessibility contract. The interpreter library

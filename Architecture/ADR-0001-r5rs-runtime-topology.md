@@ -14,12 +14,18 @@ Swift 6.3.3 and Swift Package Manager. **REQ-002** requires Swift Testing only;
 XCTest (including a local compatibility implementation) is not a supported
 long-term test dependency. The existing CLI contract and public library API are
 preserved while the topology is migrated. This record is architecture guidance,
-not a claim that the implementation is R5RS-complete or that a documented rule
-is already an enforcement gate.
+not a claim that the implementation is R5RS-complete. The narrow current
+package/no-XCTest/no-native-UI contract is enforced by the repository-local
+`Scripts/check-architecture.py` gate; broader capability ownership remains an
+architecture decision and review responsibility.
 
 ## Evidence
 
-The following observations were made in the current worktree on 2026-08-14:
+The current snapshot below is anchored to accepted semantic checkpoint
+`e89c237` (closed-current-port domain repair, descended from
+`d19f142306c2b81b9b147bbeb93d66dca1b0dcdd`) on 2026-08-14. Historical
+observations are explicitly labeled and are retained only to explain the
+migration; they are not current package evidence.
 
 - **Historical baseline (pre-migration):** `swift --version` reported Apple
   Swift 6.3.3. The pre-migration `swift package dump-package` graph reported
@@ -32,16 +38,18 @@ The following observations were made in the current worktree on 2026-08-14:
   canonical package graph. The library target path was `Sources/swiftscheme`;
   the CLI was `Sources/SwiftSchemeCLI`; package tests were wired through
   `Plugins/SwiftSchemeTestPlugin` and a local `Sources/XCTest` target.
-- `Sources/swiftscheme/SwiftScheme.swift` is a 3,531-line implementation that
+- **Current (`e89c237`):** `Sources/swiftscheme/SwiftScheme.swift` is a
+  4,293-line implementation that
   currently owns the reader (`Reader`), writer (`Writer`), syntax-rules expander
   (`SyntaxRules`), object model (`Pair`, `SchemeString`, `SchemeVector`,
   `SchemePort`, `SchemeEnvironment`, `Procedure`, `Promise`, `Value`), explicit
   evaluator/control machine (`Interpreter`, `Control`, `Continuation`, `Wind`),
   primitives and I/O helpers. The evaluator loop is iterative (`Interpreter.run`)
   and therefore is the current proper-tail-recursion control authority.
-- `Sources/swiftscheme/BigInt.swift` (420 lines) owns normalized arbitrary exact
-  integers and division/power/square-root helpers. `Sources/swiftscheme/Number.swift`
-  (379 lines) owns `Rational`, `RealComponent`, and `SchemeNumber`, including exact
+- **Current:** `Sources/swiftscheme/BigInt.swift` (480 lines) owns normalized
+  arbitrary exact integers and division/power/square-root helpers.
+  `Sources/swiftscheme/Number.swift` (399 lines) owns `Rational`, `RealComponent`,
+  and `SchemeNumber`, including exact
   and inexact arithmetic and numeric rendering.
 - `Sources/swiftscheme/SchemeHeap.swift` (84 lines) owns the weak registry,
   mark/tracing/sweep safe point, and public `HeapStatistics`. Heap edges are
@@ -65,7 +73,7 @@ The following observations were made in the current worktree on 2026-08-14:
   `Sources/XCTest/XCTest.swift`. There were no `import Testing`, `@Test`, or
   `#expect` symbols in that baseline; `import XCTest`, `XCTestCase`, `XCTMain`,
   and `testCase` remained in its transitional harness.
-- `Tests/Fixtures/{smoke,numeric-programs,portable-programs}.scm` are authored
+- **Current:** `Tests/Fixtures/{smoke,numeric-programs,portable-programs}.scm` are authored
   executable fixtures. The frozen candidate contains the two Markdown audit
   matrices under `Tests/Conformance`; the workspace also supplied uncommitted
   Chibi-Scheme, Larceny/Jaffer, and Racket R5RS trees as local audit inputs.
@@ -76,13 +84,14 @@ The following observations were made in the current worktree on 2026-08-14:
   invariants, external conformance observations, and lifetime risks. They are
   useful evidence but are not architecture enforcement.
 
-**Current post-migration evidence (2026-08-14):** `Package.swift` now declares
+**Current post-migration evidence at `e89c237` (2026-08-14):** `Package.swift` now declares
 one `SwiftScheme` library product, the `swiftscheme` CLI executable, and one
 `SwiftSchemeTests` SwiftPM test target at `Tests/SwiftSchemeTests`. A fresh
 `swift package dump-package` reports only `SwiftScheme`, `SwiftSchemeCLI`, and
 `SwiftSchemeTests` targets; no XCTest target, plugin, or test-tool path remains.
-Both authored test files import `Testing` and use Swift Testing suites/assertion
-macros. The historical bullets above are retained solely to explain the
+All eight authored Swift test files import `Testing` and use Swift Testing
+suites/assertion macros. `swift test --list-tests` reports eight suites and 68
+tests. The historical bullets above are retained solely to explain the
 migration and do not describe the current package contract.
 
 **Historical baseline validation (pre-migration):** the shared-cache build command
@@ -93,22 +102,26 @@ checkout, producing `SwiftShims` path/missing-module diagnostics. SwiftPM also
 reported another process holding the `.build` lock. No source or check was
 weakened to obtain a green result.
 
-The architecture-enforce provider query completed successfully and reported
+**Historical architecture-enforce audit (pre-local gate):** the provider query
+completed successfully and reported
 `ast-grep`, `semgrep`, `tree-sitter`, `clangd`, and build/package providers as
 available. The full architecture audit ran against the current worktree but its
 gate failed on existing findings: three disabled SwiftLint severities in
-`.swiftlint.yml`, the 3,531-line `Sources/swiftscheme/SwiftScheme.swift` review
-threshold, a redundant test owner prefix, and visible framework/artifact
+`.swiftlint.yml`, its configured 3,531-line `Sources/swiftscheme/SwiftScheme.swift`
+review threshold (the current file is 4,293 lines), a redundant test owner prefix,
+and visible framework/artifact
 exemptions. These findings are recorded for the enforce handoff; this ADR does
 not suppress or waive any of them.
 
-**Current candidate validation (2026-08-14):** with the Xcode 26.6 Swift 6.3.3
+**Current candidate validation at `e89c237` (2026-08-14):** with the Xcode 26.6 Swift 6.3.3
 toolchain (the provider that ships the Swift Testing module), a fresh-scratch
-`swift test` passed 2 suites/2 tests, and a fresh-scratch `swift build` passed.
+`swift test` passed 8 suites/68 tests, and a fresh-scratch `swift build` passed.
 `swift run swiftscheme Tests/Fixtures/smoke.scm` produced `sum=30`. The stock
 Command Line Tools Swift 6.3.3 invocation remains an environment limitation:
 its same test target fails at `import Testing` with `no such module 'Testing'`;
-the package is not weakened to accommodate that provider.
+the package is not weakened to accommodate that provider. The repository-local
+architecture preflight is `python3 Scripts/check-architecture.py` and is
+blocking rather than advisory.
 
 ## Domain
 
@@ -153,7 +166,7 @@ The selected topology is evaluated against these measurable scenarios:
 
 ## Candidate A — Do-less baseline
 
-- **Description:** keep the current one-target runtime with the 3,531-line
+- **Description:** keep the current one-target runtime with the 4,293-line
   `SwiftScheme.swift`, leave `Sources/XCTest` and the plugin harness in place,
   and add only more tests/checklist rows.
 - **Benefits:** smallest migration, lowest immediate regression risk, and no
@@ -161,7 +174,8 @@ The selected topology is evaluated against these measurable scenarios:
 - **Liabilities:** mixed reader/evaluator/macro/I/O/storage responsibilities
   remain hard to own; XCTest contradicts REQ-002; file-level architecture checks
   cannot assign durable ownership; changes have high merge and review surface.
-- **Evidence:** this is the current worktree shape described in `Evidence`.
+- **Evidence:** this is the pre-migration shape described in the historical
+  baseline above, retained as a do-less comparison rather than current state.
 
 ## Candidate B — Cohesive capability files in one library target (selected)
 
@@ -196,9 +210,11 @@ The selected topology is evaluated against these measurable scenarios:
   boundaries and test fixtures, increased compile/package complexity, and a
   larger rollback boundary. `Value`/heap/control cycles make an initially clean
   split difficult without either API duplication or unsafe leakage of internals.
-- **Evidence:** `Package.swift` currently has one library target and several
-  harness targets; no stable module contracts exist for a split. This option is
-  an evolution trigger, not the immediate migration.
+- **Evidence:** `Package.swift` currently has exactly one library target, one
+  executable target, and one Swift Testing test target; the several harness
+  targets belong only to the historical baseline above. No stable module
+  contracts exist for a split. This option is an evolution trigger, not the
+  immediate migration.
 
 ## Decision Matrix
 
@@ -219,6 +235,15 @@ library and preserve the existing public names/signatures. Internally converge
 on cohesive capability files; do not create one-type helper colonies. The target
 layout is illustrative and can be adjusted by architecture-enforce when a map
 shows a better seam:
+
+**Boundary decision:** the package boundary remains one `SwiftScheme` library
+module with `SwiftSchemeCLI` and `SwiftSchemeTests` as its only clients. Numeric,
+runtime-value/heap, frontend, evaluation/control, and primitive/port concerns
+are cohesive internal capability boundaries, not new public products. The CLI
+owns process streams and lifecycle only; tests own evidence only. Candidate B
+also deliberately adds no native Apple UI target: the current product is
+text-first and terminal-owned, with the no-UI applicability contract recorded in
+`Architecture/APPLE-HIG.md`.
 
 This choice makes the explicit **tradeoff** of keeping one SwiftPM module in
 exchange for a smaller rollback boundary and preserved source compatibility;
@@ -252,6 +277,7 @@ traceability only; they are not active ownership or dependency contracts.
 | --- | --- | --- | --- | --- | --- | --- |
 | `Reference/r5rs.pdf` | Standards/evidence owner | Normative language semantics | Read-only repository input | Project lifetime | Inbound reference only | Prevents implementation drift from R5RS |
 | `Package.swift` (current post-migration; historical baseline graph recorded above) | Package owner | Products, target graph, Swift 6.3.3 settings | Public build contract | Project lifetime | Host graph -> library/CLI/tests | Single canonical SwiftPM graph |
+| `Scripts/check-architecture.py` | Architecture-enforce owner | Blocking authored-path, toolchain, package-graph, Swift Testing, and no-native-UI preflight | Executable repository check | Project lifetime | Reads package graph and authored paths; does not import runtime code | Reproducible local gate with no external user-path dependencies |
 | `Sources/swiftscheme/BigInt.swift` | Numeric owner | Exact integer invariants | Public numeric API + private storage | Value lifetime | No runtime dependency | Arithmetic can be checked independently |
 | `Sources/swiftscheme/Number.swift` | Numeric owner | Rational/real/complex tower | Public numeric API | Value lifetime | BigInt -> Number | Keeps exactness and conversion policy cohesive |
 | `Sources/swiftscheme/SchemeHeap.swift` | Storage owner | Weak registry and tracing safe point | `HeapStatistics` public; registry internal | Interpreter lifetime | Runtime nodes -> heap protocol | Cycle ownership must not leak into evaluator policy |
@@ -262,7 +288,7 @@ traceability only; they are not active ownership or dependency contracts.
 | **Historical baseline (pre-migration):** `Tests/SwiftSchemePackageTests`, `Tests/SwiftSchemeTestTool`, `Plugins/SwiftSchemeTestPlugin` (removed) | Test-migration owner | Custom XCTest package runner | Test/build-only | Historical snapshot only | Package test -> runtime | Must stay removed; replace with Swift Testing |
 | `Tests/Fixtures` | Conformance/evidence owner | Portable programs and CLI smoke inputs | Data-only | Test lifetime | Tests/CLI -> fixtures | Keeps large inputs outside runtime source |
 | `Tests/Conformance` | Conformance owner | Candidate audit matrices; any upstream suite must be separately vetted and licensed | Documentation/data evidence | Project lifetime | External suite -> test adapter | Prevents uncommitted or vendored inputs from becoming an implicit candidate/runtime dependency |
-| `Architecture/ADR-0001-r5rs-runtime-topology.md` | Architecture owner | Decision, ownership map, migration/rollback | Documentation | Until superseded | Architecture process -> source/checks | Durable rationale; not itself an enforcement rule |
+| `Architecture/ADR-0001-r5rs-runtime-topology.md` | Architecture owner | Decision, ownership map, migration/rollback | Documentation | Until superseded | Architecture process -> source/checks | Durable rationale; narrow package contract is enforced by the local gate |
 | `Architecture/APPLE-HIG.md` | Apple-platform design owner | Platform UX/accessibility decisions if a native host UI appears | Documentation | Until superseded | HIG evidence -> host UI | Separate from terminal runtime and language semantics |
 
 **Ownership invariant:** every future changed path gets one durable owner,
@@ -441,22 +467,22 @@ swift package dump-package
 DEVELOPER_DIR=/Applications/Xcode-26.6.0.app/Contents/Developer swift build
 DEVELOPER_DIR=/Applications/Xcode-26.6.0.app/Contents/Developer swift test
 swift run swiftscheme Tests/Fixtures/smoke.scm
-python3 /Users/krystian/.agents/skills/architecture-design/scripts/check.py
-python3 /Users/krystian/.agents/skills/architecture-design/scripts/skill_checks.py eval-cases
-python3 /Users/krystian/.agents/skills/architecture-enforce/scripts/check.py
-python3 /Users/krystian/.agents/skills/architecture-enforce/scripts/providers.py capabilities --root . --format json
-python3 /Users/krystian/.agents/skills/architecture-enforce/scripts/audit_architecture.py . --format json
+python3 Scripts/check-architecture.py
 ```
 
 This ADR's observed evidence includes `swift --version`,
 `swift package dump-package`, source inventory/grep, PDF metadata/text
 inspection, the **historical** failed shared-cache `swift build`, the current
 Xcode 26.6 Swift Testing/build/CLI results, the successful provider query, and
-the failing architecture audit described in `Evidence`. The stock Command Line
-Tools provider's missing `Testing` module remains an environment limitation;
-the supported Xcode provider is green. Check integrity requirement: no ignore,
-exclusion, advisory mode, lower threshold, allow-failure, continue-on-error,
-deleted test, or weakened diagnostic was used here.
+the historical failing architecture audit described in `Evidence`. The
+repository-local `Scripts/check-architecture.py` gate replaces user-specific
+skill-script paths and checks exact Swift 6.3.3, authored-path Swift
+Testing/no-XCTest usage, the three-target package graph, and the no-native-UI
+boundary. The stock Command Line Tools provider's missing `Testing` module
+remains an environment limitation; the supported Xcode provider is green.
+Check integrity requirement: no ignore, exclusion, advisory mode, lower
+threshold, allow-failure, continue-on-error, deleted test, or weakened
+diagnostic was used here.
 
 ## Deferred
 
