@@ -965,11 +965,21 @@ private enum Writer {
   }
 
   private static func quoted(_ value: String) -> String {
-    "\""
-      + value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(
-        of: "\"",
-        with: "\\\""
-      ) + "\""
+    var result = "\""
+    for scalar in value.unicodeScalars {
+      switch scalar.value {
+      case 0x22:
+        result.append("\\")
+        result.append("\"")
+      case 0x5C:
+        result.append("\\")
+        result.append("\\")
+      default:
+        result.unicodeScalars.append(scalar)
+      }
+    }
+    result.append("\"")
+    return result
   }
 
   private static func renderPair(_ pair: Pair, _ active: inout Set<ObjectIdentifier>) -> String {

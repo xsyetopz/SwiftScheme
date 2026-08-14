@@ -224,6 +224,31 @@ struct R5RSIODataTests {
     } else {
       #expect(Bool(false), "invalid host character should write as a string datum")
     }
+
+    func expectScalarString(_ values: [Value], _ label: String) {
+      #expect(values.count == 1, "\(label)")
+      guard values.count == 1, case .string(let value) = values[0] else {
+        #expect(Bool(false), "\(label)")
+        return
+      }
+      #expect(value.characters.count == 2, "\(label)")
+      #expect(value.characters.allSatisfy { $0.unicodeScalars.count == 1 }, "\(label)")
+    }
+
+    for cluster in [Character("\"\u{301}"), Character("\\\u{301}")] {
+      expectScalarString(
+        try interpreter.read(Value.character(cluster).written),
+        "host character quote/backslash fallback"
+      )
+    }
+    for base in ["\"", "\\"] {
+      let source = SchemeString("")
+      source.characters = [Character(base), Character("\u{301}")]
+      expectScalarString(
+        try interpreter.read(Value.string(source).written),
+        "normalized string quote/backslash boundary"
+      )
+    }
   }
 
   @Test("R5RS §6.3.2 list consumers reject non-list and improper arguments")
