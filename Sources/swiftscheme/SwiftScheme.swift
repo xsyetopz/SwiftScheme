@@ -45,9 +45,17 @@ public final class Pair: SchemeHeapNode {
 public final class SchemeString {
   public var characters: [Character]
   fileprivate var isLiteral = false
-  public init(_ value: String) { characters = Array(value) }
-  init(characters: [Character]) { self.characters = characters }
+  public init(_ value: String) { characters = scalarCharacters(value) }
+  init(characters: [Character]) { self.characters = scalarCharacters(characters) }
   public var string: String { String(characters) }
+}
+
+private func scalarCharacters(_ value: String) -> [Character] {
+  value.unicodeScalars.map { Character(String($0)) }
+}
+
+private func scalarCharacters(_ value: [Character]) -> [Character] {
+  value.flatMap { $0.unicodeScalars.map { Character(String($0)) } }
 }
 
 public final class SchemeVector: SchemeHeapNode {
@@ -75,7 +83,7 @@ public final class SchemePort {
 
   fileprivate init(input: String) {
     mode = .input
-    self.input = Array(input)
+    self.input = scalarCharacters(input)
   }
   fileprivate init(output: Bool) { mode = .output }
   fileprivate init(sink: @escaping (String) throws -> Void) {
@@ -86,7 +94,7 @@ public final class SchemePort {
     self.mode = mode
     self.handle = handle
     if mode == .input {
-      input = Array(String(decoding: handle.readDataToEndOfFile(), as: UTF8.self))
+      input = scalarCharacters(String(decoding: handle.readDataToEndOfFile(), as: UTF8.self))
     } else {
       sink = { text in
         do { try handle.write(contentsOf: Data(text.utf8)) } catch {
@@ -295,7 +303,7 @@ private struct Reader {
   private var column = 1
 
   init(_ source: String, start: Int = 0) {
-    input = Array(source)
+    input = scalarCharacters(source)
     index = start
     if start > 0 {
       for character in input[..<min(start, input.count)] {
@@ -310,7 +318,7 @@ private struct Reader {
   }
 
   init(_ characters: [Character], start: Int = 0) {
-    input = characters
+    input = scalarCharacters(characters)
     index = start
     if start > 0 {
       for character in input[..<min(start, input.count)] {
@@ -480,7 +488,7 @@ private struct Reader {
     case "space": return .character(" ")
     case "newline": return .character("\n")
     default:
-      guard token.count == 1, let character = token.first else {
+      guard token.unicodeScalars.count == 1, let character = token.first else {
         throw SchemeError.lexical(
           "invalid character literal #\\\(token)",
           line: line,
@@ -3420,7 +3428,10 @@ public final class Interpreter {
       try predicate($0, "symbol?") { if case .symbol = $0 { true } else { false } }
     }
     primitive("char?", in: env) {
-      try predicate($0, "char?") { if case .character = $0 { true } else { false } }
+      try predicate($0, "char?") {
+        guard case .character(let character) = $0 else { return false }
+        return character.unicodeScalars.count == 1
+      }
     }
     primitive("string?", in: env) {
       try predicate($0, "string?") { if case .string = $0 { true } else { false } }
@@ -4098,6 +4109,9 @@ private func schemeString(_ value: Value, _ context: String) throws -> SchemeStr
 private func character(_ value: Value, _ context: String) throws -> Character {
   guard case .character(let character) = value else {
     throw SchemeError.type("\(context) expects a character")
+  }
+  guard character.unicodeScalars.count == 1 else {
+    throw SchemeError.type("character has multiple scalars")
   }
   return character
 }

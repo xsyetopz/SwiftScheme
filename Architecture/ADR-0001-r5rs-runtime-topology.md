@@ -236,6 +236,32 @@ on cohesive capability files; do not create one-type helper colonies. The target
 layout is illustrative and can be adjusted by architecture-enforce when a map
 shows a better seam:
 
+### Character-domain decision (2026-08-15)
+
+Scheme characters are modeled as exactly one Unicode scalar. `SchemeString`
+continues to expose its existing public `[Character]` storage for source
+compatibility, but string constructors, readers, and input ports materialize
+scalar boundaries, and character-consuming primitives validate that invariant.
+This keeps `string-length`/`string-ref`, `read-char`, `char->integer`, and
+`integer->char` mutually coherent without adding a second host-facing string
+type.
+
+The alternatives were evaluated explicitly:
+
+| Candidate | Decision | Reason |
+| --- | --- | --- |
+| Keep Swift grapheme clusters as Scheme characters | Rejected | A multi-scalar `Character` could satisfy `char?` while having no single `char->integer` identity, and indexing would resegment stored Scheme characters. |
+| Normalize Scheme character/string boundaries to one scalar while retaining the public `[Character]` API | **Selected** | This is compact, reversible, and gives every Scheme character a stable integer round trip at the R5RS character boundary. |
+| Invent a complete integer identity/order for grapheme clusters | Rejected | It would be a larger, non-R5RS host policy and would make Unicode grapheme behavior part of the language contract without a normative basis. |
+
+The invariant is owned by `SchemeString`, `Reader`, `SchemePort`, and the
+character primitives in the runtime implementation; changes to those seams must
+preserve scalar normalization and the `char?`/`char->integer` contract. The
+focused Swift Testing evidence is `R5RSIODataTests.scalarCharacterLiteralDomain`
+and `R5RSIODataTests.scalarCharacterBoundariesAndIntegerRoundTrips`; the
+characters/strings checklist remains **Partial** until the broader Unicode
+repertoire, ordering, and index/error matrix is linked.
+
 **Boundary decision:** the package boundary remains one `SwiftScheme` library
 module with `SwiftSchemeCLI` and `SwiftSchemeTests` as its only clients. Numeric,
 runtime-value/heap, frontend, evaluation/control, and primitive/port concerns

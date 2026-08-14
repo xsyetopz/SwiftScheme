@@ -145,6 +145,38 @@ struct R5RSIODataTests {
     )
   }
 
+  @Test("R5RS §6.3.4 rejects multi-scalar character literals")
+  func scalarCharacterLiteralDomain() {
+    expectIOError("#\\e\u{301}", "multi-scalar character literal")
+  }
+
+  @Test("R5RS §6.3.4 strings and ports expose scalar character boundaries")
+  func scalarCharacterBoundariesAndIntegerRoundTrips() throws {
+    let stringResult = try evaluateIO(
+      """
+      (let ((s "e\u{301}") (mark (integer->char 769)))
+        (let ((first (string-ref s 0)) (second (string-ref s 1)))
+          (list (string-length s) (char? first) (char? second)
+                (char->integer first) (char->integer second)
+                (char=? second mark)
+                (char=? (integer->char (char->integer first)) #\\e)
+                (char=? (integer->char (char->integer second)) mark))))
+      """
+    )
+    #expect(stringResult.written == "(2 #t #t 101 769 #t #t #t)")
+
+    let portResult = try evaluateIO(
+      """
+      (call-with-input-string "e\u{301}"
+        (lambda (p)
+          (let ((first (read-char p)) (second (read-char p)))
+            (list (char? first) (char? second)
+                  (char->integer first) (char->integer second)))))
+      """
+    )
+    #expect(portResult.written == "(#t #t 101 769)")
+  }
+
   @Test("R5RS §6.3.2 list consumers reject non-list and improper arguments")
   func listArgumentDomains() {
     expectIOError("(list-tail 1 0)", "list-tail scalar domain")
