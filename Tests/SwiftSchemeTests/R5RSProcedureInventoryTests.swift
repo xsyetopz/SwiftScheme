@@ -31,7 +31,7 @@ struct R5RSProcedureInventoryTests {
       "string-ci<?", "string-ci>?", "string-ci<=?", "string-ci>=?", "vector?", "make-vector", "vector",
       "vector-length", "vector-ref", "vector-set!", "vector->list", "list->vector", "vector-fill!",
       // §6.4–§6.6
-      "procedure?", "call-with-current-continuation", "apply", "map", "for-each", "values", "force", "eval",
+      "procedure?", "port?", "call-with-current-continuation", "apply", "map", "for-each", "values", "force", "eval",
       "call-with-values", "dynamic-wind", "scheme-report-environment", "null-environment",
       "input-port?", "output-port?", "call-with-input-file", "call-with-output-file", "open-input-file",
       "open-output-file", "close-input-port", "close-output-port", "current-input-port",

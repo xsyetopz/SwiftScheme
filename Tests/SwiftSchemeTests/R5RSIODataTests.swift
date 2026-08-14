@@ -46,6 +46,15 @@ struct R5RSIODataTests {
     #expect(result.written == "(\"martin\" \"bitBlt\" #f #t)")
   }
 
+  @Test("string-created symbols preserve control-character spellings")
+  func symbolConversionEscapesInternalTag() throws {
+    let result = try evaluateIO(
+      "(let ((s (string-append (string (integer->char 1)) \"abc\"))) "
+        + "(string=? s (symbol->string (string->symbol s))))"
+    )
+    #expect(result.written == "#t")
+  }
+
   @Test("read-created pairs, strings, and vectors remain mutable")
   func readValuesAreMutable() throws {
     #expect(

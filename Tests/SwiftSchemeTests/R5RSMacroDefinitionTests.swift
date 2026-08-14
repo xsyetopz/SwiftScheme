@@ -116,7 +116,9 @@ struct R5RSMacroDefinitionTests {
   func syntacticKeywordDefinitions() throws {
     expectR5RSyntaxError("(define define 3)", "define keyword")
     expectR5RSyntaxError("(begin (define begin list))", "begin keyword")
-    expectR5RSyntaxError("(define-syntax if (syntax-rules () ((if) 1)))", "if keyword")
+    let topLevel = Interpreter(output: { _ in })
+    _ = try topLevel.evaluate("(define-syntax if (syntax-rules () ((if x y) (+ x y))))")
+    #expect(try topLevel.evaluate("(if 20 22)").written == "42")
     expectR5RSyntaxError("((lambda () (define x 1) (define x 2) x))", "duplicate internal")
     expectR5RSyntaxError(
       "(let-syntax ((m (syntax-rules () ((m) 1))) (m (syntax-rules () ((m) 2)))) (m))",
@@ -129,6 +131,39 @@ struct R5RSMacroDefinitionTests {
       try interpreter.evaluate("(let-syntax ((if (syntax-rules () ((if) 1)))) (if))").written
         == "1"
     )
+  }
+
+  @Test("a value binding named define is an ordinary operator")
+  func formalNamedDefineShadowsDefinitionSyntax() throws {
+    let interpreter = Interpreter(output: { _ in })
+    #expect(try interpreter.evaluate("((lambda (define) (define 20 22)) +)").written == "42")
+  }
+
+  @Test("internal definition names shadow outer macros during body expansion")
+  func internalDefinitionPrebindingShadowsMacro() throws {
+    let interpreter = Interpreter(output: { _ in })
+    _ = try interpreter.evaluate(
+      "(define-syntax m (syntax-rules () ((m) (define late 1))))"
+    )
+    #expect(
+      try interpreter.evaluate(
+        "((lambda () (define m (lambda () 8)) 1 (m)))"
+      ).written == "8"
+    )
+  }
+
+  @Test("macro-generated leading definitions prebind before later expansion")
+  func macroGeneratedLeadingDefinitionPrebinding() throws {
+    let interpreter = Interpreter(output: { _ in })
+    let result = try interpreter.evaluate(
+      """
+      (define-syntax define-name
+        (syntax-rules () ((_ name) (define name (lambda () 9)))))
+      (define-syntax m (syntax-rules () ((m) 7)))
+      ((lambda () (define-name m) 1 (m)))
+      """
+    )
+    #expect(result.written == "9")
   }
 
   @Test("begin splices an initial definition group")

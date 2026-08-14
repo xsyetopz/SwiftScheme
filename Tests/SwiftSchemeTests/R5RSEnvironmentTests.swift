@@ -82,7 +82,7 @@ struct R5RSEnvironmentTests {
   func reportEnvironmentExcludesExtensions() throws {
     let interpreter = Interpreter(output: { _ in })
     _ = try interpreter.evaluate("(define r5rs-target (scheme-report-environment 5))")
-    for name in ["open-input-string", "call-with-input-string", "port?", "flush-output", "error"] {
+    for name in ["open-input-string", "call-with-input-string", "flush-output", "error"] {
       expectUnbound(
         { try interpreter.evaluate("(eval '\(name) r5rs-target)") },
         "report extension \(name)"
@@ -90,6 +90,7 @@ struct R5RSEnvironmentTests {
     }
     #expect(try interpreter.evaluate("(eval 'values r5rs-target)").written == "#<procedure>")
     #expect(try interpreter.evaluate("(eval 'input-port? r5rs-target)").written == "#<procedure>")
+    #expect(try interpreter.evaluate("(eval 'port? r5rs-target)").written == "#<procedure>")
   }
 
   @Test("scheme-report-environment rejects value definitions without a binding")

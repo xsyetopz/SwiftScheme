@@ -981,7 +981,9 @@ private let nonstandardSymbolPrefix = "\u{1}"
 
 private func symbolToken(_ spelling: String) -> String {
   let canonical = spelling.lowercased()
-  return spelling == canonical ? canonical : nonstandardSymbolPrefix + spelling
+  return spelling == canonical && !spelling.hasPrefix(nonstandardSymbolPrefix)
+    ? canonical
+    : nonstandardSymbolPrefix + spelling
 }
 
 private func symbolSpelling(_ token: String) -> String {
@@ -1533,12 +1535,8 @@ private func isSymbol(_ value: Value, _ name: String) -> Bool {
   return false
 }
 
-private func isSyntacticKeyword(_ name: String) -> Bool {
-  [
-    "quote", "lambda", "if", "set!", "begin", "cond", "and", "or", "case", "let", "let*",
-    "letrec", "do", "delay", "quasiquote", "unquote", "unquote-splicing", "define", "else",
-    "=>", "define-syntax", "syntax-rules", "let-syntax", "letrec-syntax"
-  ].contains(name)
+private func isDefinitionBoundaryKeyword(_ name: String) -> Bool {
+  ["define", "begin", "define-syntax"].contains(name)
 }
 
 private let r5rsReportProcedureNames: Set<String> = [
@@ -1561,7 +1559,7 @@ private let r5rsReportProcedureNames: Set<String> = [
   "string-copy", "string-fill!", "string=?", "string<?", "string>?", "string<=?", "string>=?",
   "string-ci=?", "string-ci<?", "string-ci>?", "string-ci<=?", "string-ci>=?", "vector?", "make-vector",
   "vector", "vector-length", "vector-ref", "vector-set!", "vector->list", "list->vector", "vector-fill!",
-  "procedure?", "apply", "call-with-current-continuation", "map", "for-each", "values", "call-with-values",
+  "procedure?", "port?", "apply", "call-with-current-continuation", "map", "for-each", "values", "call-with-values",
   "dynamic-wind", "force", "eval", "scheme-report-environment", "null-environment", "input-port?",
   "output-port?", "current-input-port", "current-output-port", "call-with-input-file", "call-with-output-file",
   "open-input-file", "open-output-file", "close-input-port", "close-output-port", "read", "read-char",
@@ -1822,13 +1820,48 @@ public final class Interpreter {
     return expression
   }
 
+  private func isCoreForm(
+    _ value: Value, _ name: String, in environment: SchemeEnvironment
+  ) -> Bool {
+    guard case .pair(let pair) = value, isSymbol(pair.car, name) else { return false }
+    // A value binding shadows a syntactic keyword. The macro check keeps raw
+    // body forms consistent with the already-expanded expression path.
+    return environment.cell(name) == nil && environment.macro(name) == nil
+  }
+
+  private func isDefinitionForm(
+    _ value: Value, _ name: String, in environment: SchemeEnvironment
+  ) -> Bool { isCoreForm(value, name, in: environment) }
+
+  private func leadingBodyForms(
+    _ body: [Value], in environment: SchemeEnvironment
+  ) throws -> [Value] {
+    var pending = body
+    var result: [Value] = []
+    var leading = true
+    while !pending.isEmpty {
+      let form = pending.removeFirst()
+      if leading, isCoreForm(form, "begin", in: environment) {
+        let elements = try array(from: form, context: "begin")
+        pending.insert(contentsOf: elements.dropFirst(), at: 0)
+        continue
+      }
+      result.append(form)
+      if !isDefinitionForm(form, "define", in: environment),
+        !isDefinitionForm(form, "define-syntax", in: environment)
+      { leading = false }
+    }
+    return result
+  }
+
   private func expandedBody(_ body: [Value], in environment: SchemeEnvironment) throws -> [Value] {
     var pending = body
     var expanded: [Value] = []
     while !pending.isEmpty {
       let form = try expandMacros(pending.removeFirst(), in: environment)
-      if case .pair(let pair) = form, isSymbol(pair.car, "begin") {
-        pending.insert(contentsOf: try array(from: pair.cdr, context: "begin"), at: 0)
+      if isCoreForm(form, "begin", in: environment) {
+        let elements = try array(from: form, context: "begin")
+        pending.insert(contentsOf: elements.dropFirst(), at: 0)
       } else {
         expanded.append(form)
       }
@@ -1842,13 +1875,12 @@ public final class Interpreter {
     let expanded = try expandedBody(body, in: environment)
     var sawExpression = false
     for form in expanded {
-      if case .pair(let pair) = form, case .symbol(let name) = pair.car,
-        name == "define" || name == "define-syntax"
-      {
+      if isDefinitionForm(form, "define", in: environment)
+        || isDefinitionForm(form, "define-syntax", in: environment) {
         if sawExpression {
           throw SchemeError.syntax("definition after expression in \(context)")
         }
-        if name == "define-syntax" {
+        if isDefinitionForm(form, "define-syntax", in: environment) {
           throw SchemeError.syntax("define-syntax is only valid at top level")
         }
       } else {
@@ -1861,10 +1893,46 @@ public final class Interpreter {
   }
 
   private func prepareInternalDefinitions(_ body: [Value], in environment: SchemeEnvironment) throws {
-    let expanded = try expandedBody(body, in: environment)
     var names = Set<String>()
-    for form in expanded {
-      guard case .pair(let pair) = form, isSymbol(pair.car, "define") else { break }
+    let raw = try leadingBodyForms(body, in: environment)
+    try prebindDefinitions(raw, in: environment, names: &names)
+
+    // A leading macro may expand to a definition. Expand only after raw
+    // definition names are installed so later forms cannot invoke an outer
+    // macro with a name that is local to this body.
+    _ = try expandedBodyWithPrebinding(body, in: environment, names: &names)
+  }
+
+  private func expandedBodyWithPrebinding(
+    _ body: [Value], in environment: SchemeEnvironment, names: inout Set<String>
+  ) throws -> [Value] {
+    var pending = body
+    var expanded: [Value] = []
+    var leading = true
+    while !pending.isEmpty {
+      let form = try expandMacros(pending.removeFirst(), in: environment)
+      if isCoreForm(form, "begin", in: environment) {
+        let elements = try array(from: form, context: "begin")
+        pending.insert(contentsOf: elements.dropFirst(), at: 0)
+        continue
+      }
+      expanded.append(form)
+      if leading, isDefinitionForm(form, "define", in: environment) {
+        try prebindDefinitions([form], in: environment, names: &names, allowExisting: true)
+      } else if !isDefinitionForm(form, "define-syntax", in: environment) {
+        leading = false
+      }
+    }
+    return expanded
+  }
+
+  private func prebindDefinitions(
+    _ forms: [Value], in environment: SchemeEnvironment, names: inout Set<String>,
+    allowExisting: Bool = false
+  ) throws {
+    for form in forms {
+      guard isDefinitionForm(form, "define", in: environment),
+        case .pair(let pair) = form else { break }
       let definition = try array(from: .pair(pair), context: "define")
       guard definition.count >= 3 else { throw SchemeError.syntax("define requires name and value") }
       let name: String
@@ -1876,12 +1944,16 @@ public final class Interpreter {
         }
         name = try identifier(signature.car, "define")
       }
-      guard !isSyntacticKeyword(name) else {
+      guard !isDefinitionBoundaryKeyword(name) else {
         throw SchemeError.syntax("cannot define syntactic keyword \(name)")
       }
-      guard names.insert(name).inserted else {
-        throw SchemeError.syntax("duplicate internal definition \(name)")
+      if names.contains(name) {
+        guard allowExisting else {
+          throw SchemeError.syntax("duplicate internal definition \(name)")
+        }
+        continue
       }
+      names.insert(name)
       environment.define(name, .undefined)
     }
   }
@@ -1960,11 +2032,13 @@ public final class Interpreter {
               let validation = SchemeEnvironment(parent: environment)
               for name in formals.fixed { validation.define(name, .undefined) }
               if let rest = formals.rest { validation.define(rest, .undefined) }
-              try validateBody(Array(form.dropFirst(2)), context: "lambda", in: validation)
+              let body = Array(form.dropFirst(2))
+              try prepareInternalDefinitions(body, in: validation)
+              try validateBody(body, context: "lambda", in: validation)
               control = .values([
                 .procedure(
                   Procedure(
-                    .closure(formals, Array(form.dropFirst(2)), environment)
+                    .closure(formals, body, environment)
                   )
                 )
               ])
@@ -1976,7 +2050,7 @@ public final class Interpreter {
               try environment.requireDefinitionAllowed()
               if case .symbol(let name) = form[1] {
                 try require(form, 3, "define")
-                guard !isSyntacticKeyword(name) else {
+                guard !isDefinitionBoundaryKeyword(name) else {
                   throw SchemeError.syntax("cannot define syntactic keyword \(name)")
                 }
                 continuation = .defineFrame(name, environment, continuation)
@@ -1986,7 +2060,7 @@ public final class Interpreter {
                   throw SchemeError.syntax("invalid define")
                 }
                 let name = try identifier(signature.car, "define")
-                guard !isSyntacticKeyword(name) else {
+                guard !isDefinitionBoundaryKeyword(name) else {
                   throw SchemeError.syntax("cannot define syntactic keyword \(name)")
                 }
                 let formals = try parseFormals(signature.cdr)
@@ -1994,10 +2068,12 @@ public final class Interpreter {
                 validation.define(name, .undefined)
                 for formal in formals.fixed { validation.define(formal, .undefined) }
                 if let rest = formals.rest { validation.define(rest, .undefined) }
-                try validateBody(Array(form.dropFirst(2)), context: "define", in: validation)
+                let body = Array(form.dropFirst(2))
+                try prepareInternalDefinitions(body, in: validation)
+                try validateBody(body, context: "define", in: validation)
                 let procedure = Value.procedure(
                   Procedure(
-                    .closure(formals, Array(form.dropFirst(2)), environment)
+                    .closure(formals, body, environment)
                   )
                 )
                 if !environment.fillPlaceholder(name, procedure) {
@@ -2010,7 +2086,7 @@ public final class Interpreter {
               try require(form, 3, "define-syntax")
               try environment.requireDefinitionAllowed()
               let name = try identifier(form[1], "define-syntax")
-              guard !isSyntacticKeyword(name) else {
+              guard !isDefinitionBoundaryKeyword(name) else {
                 throw SchemeError.syntax("cannot define syntactic keyword \(name)")
               }
               environment.macros[name] = try SyntaxRules(
@@ -2036,8 +2112,8 @@ public final class Interpreter {
                   definition: definitionEnvironment
                 )
               }
-              try validateBody(body, context: keyword, in: local)
               try prepareInternalDefinitions(body, in: local)
+              try validateBody(body, context: keyword, in: local)
               continuation = .beginFrame(Array(body.dropFirst()), local, continuation)
               control = .expression(body[0], local)
               continue
@@ -2060,10 +2136,10 @@ public final class Interpreter {
               try ensureDistinct(entries, "letrec")
               let local = SchemeEnvironment(parent: environment)
               for (name, _) in entries { local.define(name, .undefined) }
-              try validateBody(Array(form.dropFirst(2)), context: "letrec", in: local)
+              let body = Array(form.dropFirst(2))
+              try prepareInternalDefinitions(body, in: local)
+              try validateBody(body, context: "letrec", in: local)
               if entries.isEmpty {
-                let body = Array(form.dropFirst(2))
-                try prepareInternalDefinitions(body, in: local)
                 continuation = .beginFrame(Array(form.dropFirst(3)), local, continuation)
                 control = .expression(form[2], local)
               } else {
@@ -2187,7 +2263,6 @@ public final class Interpreter {
             continuation = .letrecFrame(entries, following, environment, body, next)
             control = .expression(entries[following].1, environment)
           } else {
-            try prepareInternalDefinitions(body, in: environment)
             continuation = .beginFrame(Array(body.dropFirst()), environment, next)
             control = .expression(body[0], environment)
           }
@@ -2289,8 +2364,8 @@ public final class Interpreter {
           if let rest = formals.rest {
             local.define(rest, makeList(arguments.dropFirst(formals.fixed.count)))
           }
-          try validateBody(body, context: "procedure body", in: local)
           try prepareInternalDefinitions(body, in: local)
+          try validateBody(body, context: "procedure body", in: local)
           guard let first = body.first else { throw SchemeError.syntax("empty procedure body") }
           continuation = .beginFrame(Array(body.dropFirst()), local, continuation)
           control = .expression(first, local)
