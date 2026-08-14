@@ -18,24 +18,26 @@ claim of R5RS completeness.
 - `[N/A]` - outside the current language/UI scope; never used to hide a language gap.
 
 The audit maps the printed page and section in the local PDF to source symbols and
-named Swift Testing evidence. R5RS-required and R5RS-library procedures are listed
-separately from optional procedures and local extensions. Unspecified or
-implementation-dependent behavior is not treated as a passing assertion.
+current Swift Testing assertion labels. R5RS-required and R5RS-library procedures
+are listed separately from optional procedures and local extensions. An open row
+is not rescued by a registration count, fixture, or campaign-temp report.
+Unspecified or implementation-dependent behavior is not treated as a passing
+assertion.
 
 ## Footprint matrix
 
 | Check | R5RS surface | Current status | Footprint in this workspace | Evidence / remaining work |
 |---|---|---|---|---|
-| `[~]` | Lexical conventions, datum reader, and external representations (2.1-2.3, pp. 5-8; 7.1.2) | Partial | `Reader` and `Writer` in `Sources/swiftscheme/SwiftScheme.swift`; comments, case-folded identifiers, booleans, strings, characters, lists, dotted lists, vectors, quote/quasiquote abbreviations, and radix/exactness number forms are present. | Swift Testing reader tests cover representative forms. A complete malformed-token/grammar matrix and all external-representation round trips remain open. |
-| `[x]` | Core expressions: variable reference, literal, call, `quote`, `lambda`, `if`, `set!`, `begin` (4.1, pp. 8-10) | Supported | `Interpreter.run`, `SchemeEnvironment`, `Procedure`, `parseFormals`. | Closure mutation, variadic formals, branch laziness, sequencing, unbound `set!`, and duplicate-formal tests. |
-| `[x]` | Derived expressions: `cond`, `case`, `and`, `or`, `let`, `let*`, `letrec`, named `let`, `do`, `delay`, `quasiquote` (4.2, pp. 10-13) | Supported | `expandCond`, `expandCase`, `expandAnd`, `expandOr`, `expandLet`, `expandLetStar`, `expandDo`, `expandQuasiquote`; `Promise` and `force`. | Named-let iteration, short-circuiting, arrow `cond`, `do`, quasiquote/splicing, and delay memoization are exercised. Add malformed and unspecified-result cases. |
+| `[~]` | Lexical conventions, datum reader, and external representations (2.1-2.3, pp. 5-8; 7.1.2, p. 39) | Partial | `Reader` and `Writer` in `Sources/swiftscheme/SwiftScheme.swift`; comments, case-folded identifiers, booleans, strings, characters, lists, dotted lists, vectors, quote/quasiquote abbreviations, and radix/exactness number forms are present. | The `R5RS evaluator, heap, continuation, and file regressions` test labels `reader/writer`, `lexical forms`, `vector reader/writer`, `bad dotted list`, and `unterminated string`. A complete malformed-token/grammar matrix and all external-representation round trips remain open. |
+| `[x]` | Core expressions: variable reference, literal, call, `quote`, `lambda`, `if`, `set!`, `begin` (4.1, pp. 8-10) | Supported | `Interpreter.run`, `SchemeEnvironment`, `Procedure`, `parseFormals`. | Current labels cover `reader/writer`, `closure mutation`, `variadic lambda`, `if`, `unbound set`, and `duplicate formals`; sequencing also appears in the multi-form evaluator cases. |
+| `[~]` | Derived expressions: `cond`, `case`, `and`, `or`, `let`, `let*`, `letrec`, named `let`, `do`, `delay`, `quasiquote` (4.2, pp. 10-13) | Partial | `expandCond`, `expandCase`, `expandAnd`, `expandOr`, `expandLet`, `expandLetStar`, `expandDo`, `expandQuasiquote`; `Promise` and `force`. | Current labels cover `and`, `or`, `let family`, `letrec`, `cond arrow`, `case`, `do`, `quasiquote`, and `delay/force`. Explicit side-effect laziness, named-let boundary, malformed forms, and unspecified-result cases remain open. |
 | `[~]` | Programs, top-level definitions, internal definitions (5.1-5.2, pp. 16-17) | Partial | Top-level `evaluate` loop and `define`/procedure shorthand in `Interpreter.run`. | Definitions work in existing fixtures; legal internal-definition grouping/order and rejection of definitions after expressions are not independently proven. |
-| `[x]` | Hygienic macros: `syntax-rules`, `define-syntax`, `let-syntax`, `letrec-syntax` (4.3, 5.3, pp. 13-17; 7.1.5) | Supported | `SyntaxRules`, macro environments, and evaluator macro dispatch. | Hygiene, definition-site references, literals, nested/empty ellipses, and local macro tests exist. Expand dotted-pattern/custom-ellipsis diagnostics. |
-| `[x]` | Proper tail recursion and first-class continuations (3.5, p. 7; 6.4, pp. 31-35) | Supported | Iterative `Control`/`Continuation` machine; `call/cc`, `dynamic-wind`, and continuation wind transitions. | 100,000-step tail loop, multi-shot continuation, and `dynamic-wind` re-entry tests pass in the isolated baseline; rerun under Swift Testing. |
+| `[~]` | Hygienic macros: `syntax-rules`, `define-syntax`, `let-syntax`, `letrec-syntax` (4.3, 5.3, pp. 13-17; 7.1.5, p. 40) | Partial | `SyntaxRules`, macro environments, and evaluator macro dispatch. | Current labels cover `syntax-rules ellipsis`, `macro hygiene`, quoted macro data/pattern variables, referentially transparent references, `let-syntax`, and nested ellipses. No dedicated `letrec-syntax`, dotted-pattern, custom-ellipsis, or malformed-diagnostic case is claimed. |
+| `[x]` | Proper tail recursion and first-class continuations (3.5, p. 7; 6.4, pp. 31-35) | Supported | Iterative `Control`/`Continuation` machine; `call/cc`, `dynamic-wind`, and continuation wind transitions. | The `proper tail recursion`, `multi-shot continuation`, `dynamic-wind`, and `dynamic-wind continuation transitions` assertions run in the native Swift Testing suite; the tail loop is 200,000 iterations. |
 | `[x]` | Booleans, pairs/lists, symbols, and equivalence predicates (6.1, 6.3.1-6.3.3, pp. 17-19, 25-29) | Supported | `Value`, `Pair`, list helpers, symbol folding, `eq?`, `eqv?`, and cycle-aware `equal?`. | Mutation, improper lists, selectors, membership/association, structural equality, and cycle termination are covered; add direct unspecified `eq?`/`eqv?` corner cases. |
 | `[~]` | Characters and strings (6.3.4-6.3.5, pp. 29-31) | Partial | Character reader and character/string primitives backed by Swift `Character`. | Basic mutation/conversion/comparison tests exist. Unicode repertoire, case mapping/order, and index/error boundaries need a linked matrix. |
 | `[x]` | Vectors (6.3.6, pp. 31-33) | Supported | `SchemeVector`, vector reader/writer, mutation and list conversion primitives. | Mutable/cyclic vector writer/equality tests exist; add every fill/ref/conversion boundary. |
-| `[~]` | Numeric tower, exactness, arithmetic, and numeric I/O (6.2.1-6.2.6, pp. 19-25; 7.1.1) | Partial | `BigInt`, `Rational`, `RealComponent`, `SchemeNumber`, numeric reader, arithmetic/comparison/rounding/transcendental/complex primitives. | Large exact integer, rational, complex, exactness, radix, and round-trip evidence is strong. `#` placeholders, infinities/NaN conventions, all branch/domain/error cases, and full per-procedure tests remain open. |
+| `[~]` | Numeric tower, exactness, arithmetic, and numeric I/O (6.2.1-6.2.6, pp. 19-25; 7.1.1, pp. 38-39) | Partial | `BigInt`, `Rational`, `RealComponent`, `SchemeNumber`, numeric reader, arithmetic/comparison/rounding/transcendental/complex primitives. | Current assertion labels and open cases are enumerated in [`R5RS-NUMERIC-COVERAGE.md`](R5RS-NUMERIC-COVERAGE.md). `#` placeholders, infinities/NaN conventions, polar/transcendental branches, all domain/error cases, and full per-procedure tests remain open. |
 | `[x]` | Control features, multiple values, promises, `eval` (6.4-6.5, pp. 31-35) | Supported | Special procedures for `apply`, `call/cc`, `values`, `call-with-values`, `dynamic-wind`, `force`, and `eval`; environment constructors. | Existing tests cover escapes, multiple values, wind transitions, promise memoization, and report-environment evaluation. Add value-count/error matrix. |
 | `[~]` | Report/null/interaction environments (6.5, p. 35) | Partial | `scheme-report-environment`, `null-environment`, and `interaction-environment`. | Version 5 acceptance and report evaluation are tested. Assignment/environment mutability semantics are intentionally not overclaimed. |
 | `[~]` | Ports, files, `read`, `write`, `display`, and character I/O (6.6.1-6.6.3, pp. 35-37) | Partial | `SchemePort`, file/string ports, current ports, open/close, read/read-char/peek-char, write/display/newline/write-char. | File continuation exit/re-entry and output separation are tested. Closed-port, EOF, readiness, I/O-error, and complete reader integration matrices remain open; `char-ready?` is currently conservative. |
@@ -48,8 +50,9 @@ implementation-dependent behavior is not treated as a passing assertion.
 **Audit-start snapshot (before the Swift Testing migration):** 18 reviewed
 surfaces — 7 Supported, 9 Partial, 1 Missing (the explicit no-XCTest constraint),
 and 1 Not applicable. **Post-migration confirmation:** the test-framework row is
-now Supported, so the current row count is 8 Supported, 9 Partial, 0 Missing, and
-1 Not applicable. These are row counts, not feature or conformance percentages.
+now Supported, while derived-expression and macro evidence is Partial. The current
+row count is 6 Supported, 11 Partial, 0 Missing, and 1 Not applicable. These are
+row counts, not feature or conformance percentages.
 
 ## Required and library procedure footprint
 
@@ -88,17 +91,24 @@ to focused Swift Testing coverage before it can be called complete.
 - R5RS leaves some `eq?`, `eqv?`, literal sharing, evaluation order, and external
   representations unspecified or implementation-dependent. Tests must assert only
   permitted behavior.
-- The vendored Chibi/Larceny/Racket material under `Tests/Conformance/` is reference
-  evidence, not a substitute for Swift Testing tests and must remain unmodified.
+- The workspace supplied local Chibi/Larceny/Racket material under
+  `Tests/Conformance/`, but those uncommitted audit inputs are intentionally absent
+  from the frozen candidate. They are reference context, not release evidence or a
+  substitute for Swift Testing tests; if promoted, add them in a separately reviewed
+  and licensed candidate.
 
 ## Evidence ledger and next slices
 
-- Triage report and extracted PDF evidence: `/tmp/skizzles-orchestration/swiftscheme-r5rs-20260814/triage/triage__r5rs_footprint/`.
+- Triage report and extracted PDF evidence were campaign-temp inputs at
+  `/tmp/skizzles-orchestration/swiftscheme-r5rs-20260814/triage/triage__r5rs_footprint/`;
+  they are not part of the candidate and are not required to interpret this
+  self-contained checklist.
 - Architecture decision and long-term topology/enforcement plan:
   [`Architecture/ADR-0001-r5rs-runtime-topology.md`](../../Architecture/ADR-0001-r5rs-runtime-topology.md).
 - Apple HIG applicability boundary:
   [`Architecture/APPLE-HIG.md`](../../Architecture/APPLE-HIG.md).
-- Swift Testing migration owner: `/root/worker__swift_testing_migration`.
+- Current native test evidence is limited to the two `@Test` labels named in
+  `R5RS-NUMERIC-COVERAGE.md`; it must not be generalized into per-procedure proof.
 - Follow-up conformance owner (not started in this campaign): add section-linked Swift
   Testing cases for the concrete gaps above, then repair only the owning semantic
   boundary when a new test fails.

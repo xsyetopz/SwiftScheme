@@ -289,10 +289,10 @@ import Testing
 
     try expect(
       """
-      (let loop ((n 100000) (acc 0))
+      (let loop ((n 200000) (acc 0))
         (if (= n 0) acc (loop (- n 1) (+ acc 1))))
       """,
-      "100000",
+      "200000",
       "proper tail recursion"
     )
 
@@ -402,6 +402,6 @@ import Testing
 
 @Suite("SwiftScheme BigInt kernel") struct SwiftSchemeBigIntTests {
   @Test("arithmetic, division, radix, and conversion invariants") func bigIntKernel() throws {
-    _ = try runBigIntKernelSelfChecks()
+    try runBigIntKernelChecks()
   }
 }

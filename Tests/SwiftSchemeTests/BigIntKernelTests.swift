@@ -1,11 +1,8 @@
 import SwiftScheme
 import Testing
 
-@discardableResult func runBigIntKernelSelfChecks() throws -> Int {
-  var checks = 0
-
+func runBigIntKernelChecks() throws {
   func expect(_ condition: @autoclosure () -> Bool, _ label: String) {
-    checks += 1
     #expect(condition(), "BigInt: \(label)")
   }
 
@@ -145,11 +142,9 @@ import Testing
   do {
     _ = try a.quotient(dividingBy: .zero)
     #expect(Bool(false), "BigInt: division by zero accepted")
-  } catch BigIntError.divisionByZero { checks += 1 }
+  } catch BigIntError.divisionByZero {}
   do {
     _ = try BigInt(2).power(-1)
     #expect(Bool(false), "BigInt: negative exponent accepted")
-  } catch BigIntError.negativeExponent { checks += 1 }
-
-  return checks
+  } catch BigIntError.negativeExponent {}
 }

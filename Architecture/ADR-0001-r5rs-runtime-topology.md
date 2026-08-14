@@ -66,11 +66,12 @@ The following observations were made in the current worktree on 2026-08-14:
   `#expect` symbols in that baseline; `import XCTest`, `XCTestCase`, `XCTMain`,
   and `testCase` remained in its transitional harness.
 - `Tests/Fixtures/{smoke,numeric-programs,portable-programs}.scm` are authored
-  executable fixtures. `Tests/Conformance` contains vendored Chibi-Scheme,
-  Larceny/Jaffer, and Racket R5RS material; those trees are evidence inputs and
-  must not become runtime source dependencies. `Reference/r5rs.pdf` is the
-  immutable normative source (50 pages; sections 2, 3, 4, 5, 6, and 7 are used
-  by the implementation notes).
+  executable fixtures. The frozen candidate contains the two Markdown audit
+  matrices under `Tests/Conformance`; the workspace also supplied uncommitted
+  Chibi-Scheme, Larceny/Jaffer, and Racket R5RS trees as local audit inputs.
+  Those external inputs are not candidate evidence or runtime dependencies.
+  `Reference/r5rs.pdf` is the immutable normative source (50 pages; sections 2,
+  3, 4, 5, 6, and 7 are used by the implementation notes).
 - `NOTES.md`, `PORTING.md`, and `LIFETIMES.tsv` record design intent, runtime
   invariants, external conformance observations, and lifetime risks. They are
   useful evidence but are not architecture enforcement.
@@ -260,7 +261,7 @@ traceability only; they are not active ownership or dependency contracts.
 | `Tests/SwiftSchemeTests` (current post-migration) | Runtime test owner | Swift Testing numeric and language behavior suites | Test target only | Test invocation | Tests -> `SwiftScheme` | Direct evidence of public contracts |
 | **Historical baseline (pre-migration):** `Tests/SwiftSchemePackageTests`, `Tests/SwiftSchemeTestTool`, `Plugins/SwiftSchemeTestPlugin` (removed) | Test-migration owner | Custom XCTest package runner | Test/build-only | Historical snapshot only | Package test -> runtime | Must stay removed; replace with Swift Testing |
 | `Tests/Fixtures` | Conformance/evidence owner | Portable programs and CLI smoke inputs | Data-only | Test lifetime | Tests/CLI -> fixtures | Keeps large inputs outside runtime source |
-| `Tests/Conformance` | Conformance owner | Pinned upstream suites and licenses | Data/tooling evidence | Project lifetime | External suite -> test adapter | Prevents vendored code from becoming implementation dependency |
+| `Tests/Conformance` | Conformance owner | Candidate audit matrices; any upstream suite must be separately vetted and licensed | Documentation/data evidence | Project lifetime | External suite -> test adapter | Prevents uncommitted or vendored inputs from becoming an implicit candidate/runtime dependency |
 | `Architecture/ADR-0001-r5rs-runtime-topology.md` | Architecture owner | Decision, ownership map, migration/rollback | Documentation | Until superseded | Architecture process -> source/checks | Durable rationale; not itself an enforcement rule |
 | `Architecture/APPLE-HIG.md` | Apple-platform design owner | Platform UX/accessibility decisions if a native host UI appears | Documentation | Until superseded | HIG evidence -> host UI | Separate from terminal runtime and language semantics |
 
@@ -449,12 +450,13 @@ python3 /Users/krystian/.agents/skills/architecture-enforce/scripts/audit_archit
 
 This ADR's observed evidence includes `swift --version`,
 `swift package dump-package`, source inventory/grep, PDF metadata/text
-inspection, the failed `swift build`, the successful provider query, and the
-failing architecture audit described in `Evidence`. Swift Testing tests and
-CLI smoke remain **UNVERIFIED** until the test worker and root integration
-complete. Check integrity requirement: no ignore, exclusion, advisory mode,
-lower threshold, allow-failure, continue-on-error, deleted test, or weakened
-diagnostic was used here.
+inspection, the **historical** failed shared-cache `swift build`, the current
+Xcode 26.6 Swift Testing/build/CLI results, the successful provider query, and
+the failing architecture audit described in `Evidence`. The stock Command Line
+Tools provider's missing `Testing` module remains an environment limitation;
+the supported Xcode provider is green. Check integrity requirement: no ignore,
+exclusion, advisory mode, lower threshold, allow-failure, continue-on-error,
+deleted test, or weakened diagnostic was used here.
 
 ## Deferred
 
@@ -462,7 +464,8 @@ diagnostic was used here.
   symbol dependencies; no source move is implied by this ADR alone.
 - R5RS footprint status, unsupported procedures, and external-suite counts belong
   in the root-owned checklist/report, not this topology decision.
-- Swift Testing API availability and package test execution on the eventual
-  clean build directory are **UNVERIFIED** in this worker slice.
+- Swift Testing API availability and package test execution are verified for the
+  Xcode 26.6 Swift 6.3.3 provider in the current candidate; re-run them for any
+  future toolchain or package-graph change.
 - Thread safety, async cancellation/timeouts, and native Apple UI adaptation are
   **UNVERIFIED** and require separate decisions before implementation.

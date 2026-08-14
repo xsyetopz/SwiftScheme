@@ -42,15 +42,20 @@ swift test
 swift run swiftscheme Tests/Fixtures/smoke.scm
 ```
 
-## External conformance evidence
+## External conformance inputs
 
-- Suite: Chibi-Scheme `tests/r5rs-tests.scm`.
-- Source: `https://github.com/ashinn/chibi-scheme.git`.
-- Revision: `e5be6cbbcc29ce1fcd2b306644c4fcf3e02707d3`.
-- License: BSD 3-Clause, retained in `Tests/Conformance/chibi-scheme/COPYING`.
-- Result: 189/189 passed with the source suite unmodified.
-- Larceny/Jaffer `test/Jaffer/r4rstest.scm`: source `https://github.com/larcenists/larceny`, revision `fef550c7d3923deb7a5a1ccd5a628e54cf231c75`, SHA-256 `648684e38941737583a1106cac094a20c119ecd385b13025944025beb78d9254`. It remains unmodified. The mandatory run exits 0 with 11 recorded expectation mismatches: 3 R4RS symbol-standard-case/string-display expectations and 6 pure-imaginary strings that R4RS expects rejected but R5RS complex support accepts, plus 2 file display/write consequences of symbol/string formatting. Optional continuation/Scheme-4/delay calls run from an unmodified load wrapper; delay/force passes after promise re-entry memoization, while the inherited report retains the same applicable expectation records.
-- No reputable Scheme executable was found in the current PATH during PREP (`chibi-scheme`, `guile`, `racket`, `gosh`, and `scheme` were absent). Differential evidence therefore uses pinned upstream suites plus pure-Swift overlapping-range oracles unless that environment changes.
+The workspace supplied local Chibi-Scheme, Larceny/Jaffer, and Racket R5RS
+trees during the audit, but they are uncommitted inputs intentionally absent from
+the frozen candidate. This record therefore makes **no upstream pass/fail claim**
+and does not refer to a license file that is absent from the candidate. If an
+external suite becomes release evidence, add its pinned revision, license, adapter,
+and unmodified-run output in a separately reviewed candidate.
+
+No reputable Scheme executable was found in the current PATH during PREP
+(`chibi-scheme`, `guile`, `racket`, `gosh`, and `scheme` were absent). Differential
+evidence for this candidate is limited to native Swift Testing assertions,
+fixtures explicitly marked open in the R5RS checklists, and pure-Swift
+overlapping-range oracles unless that environment changes.
 - Portable program fixture: iterative Fibonacci, recursive quicksort with internal definitions, hygienic macro use, and multiple values in `Tests/Fixtures/portable-programs.scm`.
 
 ## Review gates
