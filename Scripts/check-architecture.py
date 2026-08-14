@@ -141,11 +141,21 @@ def _strip_swift_noise(source: str) -> str:
             keyword and keyword.group(0) in {"case", "return", "throw", "yield"}
         )
 
-    def regex_end(start: int, extended: bool) -> int:
+    def extended_hash_count(start: int) -> int:
+        """Count a valid run of `#` immediately before an extended regex `/`."""
+
+        if source[start] != "#":
+            return 0
+        cursor = start
+        while cursor < length and source[cursor] == "#":
+            cursor += 1
+        return cursor - start if cursor < length and source[cursor] == "/" else 0
+
+    def regex_end(start: int, hash_count: int) -> int:
         """Find a Swift slash/extended-regex closing delimiter, if present."""
 
-        cursor = start + (2 if extended else 1)
-        closing = "/#" if extended else "/"
+        cursor = start + (hash_count + 1 if hash_count else 1)
+        closing = "/" + ("#" * hash_count)
         while cursor < length:
             if source[cursor] == "\\":
                 # Escaped slash, hash, or backslash cannot close the literal;
@@ -153,8 +163,14 @@ def _strip_swift_noise(source: str) -> str:
                 cursor += 2
                 continue
             if source.startswith(closing, cursor):
-                return cursor + len(closing)
-            if not extended and source[cursor] in "\r\n":
+                end = cursor + len(closing)
+                # An extended delimiter must have exactly the opening hash
+                # count; `/##` cannot close a `#/.../#` literal.
+                if hash_count and end < length and source[end] == "#":
+                    cursor += 1
+                    continue
+                return end
+            if not hash_count and source[cursor] in "\r\n":
                 # Bare regex literals are single-line; let normal source
                 # scanning continue when no closing delimiter was found.
                 return start
@@ -163,15 +179,20 @@ def _strip_swift_noise(source: str) -> str:
 
     cursor = 0
     while cursor < length:
-        if source.startswith("#/", cursor):
-            end = regex_end(cursor, extended=True)
+        hash_count = extended_hash_count(cursor)
+        if hash_count:
+            end = regex_end(cursor, hash_count)
             if end != cursor:
                 blank(cursor, end)
                 cursor = end
                 continue
+            # Do not retry suffixes of an unterminated hash run as a smaller
+            # extended delimiter; normal scanning can still find later code.
+            cursor += hash_count
+            continue
 
         if source[cursor] == "/" and regex_start(cursor):
-            end = regex_end(cursor, extended=False)
+            end = regex_end(cursor, hash_count=0)
             if end != cursor:
                 blank(cursor, end)
                 cursor = end
