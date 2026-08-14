@@ -138,7 +138,8 @@ def _strip_swift_noise(source: str) -> str:
         prefix = "".join(output[: previous + 1])
         keyword = re.search(r"[A-Za-z_][A-Za-z0-9_]*$", prefix)
         return bool(
-            keyword and keyword.group(0) in {"case", "return", "throw", "yield"}
+            keyword
+            and keyword.group(0) in {"case", "in", "return", "throw", "yield"}
         )
 
     def extended_hash_count(start: int) -> int:
