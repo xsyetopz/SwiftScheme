@@ -84,17 +84,17 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_version() -> tuple[int, str]:
+def _run_version(executable: str) -> tuple[int, str]:
     try:
         result = subprocess.run(
-            ["swift", "--version"],
+            [executable, "--version"],
             cwd=ROOT,
             check=False,
             capture_output=True,
             text=True,
         )
     except OSError as error:
-        return 127, f"unable to execute swift --version: {error}"
+        return 127, f"unable to execute {executable} --version: {error}"
     output = (result.stdout + result.stderr).strip()
     return result.returncode, output
 
@@ -190,14 +190,17 @@ def _check_toolchain(errors: list[str]) -> None:
                 f".swift-version must contain exactly 6.3.3 (found {lines!r})"
             )
 
-    returncode, output = _run_version()
-    if returncode != 0:
-        errors.append(f"swift --version failed with exit {returncode}: {output}")
-    elif not re.search(r"(?:Apple )?Swift version 6\.3\.3\b", output):
-        errors.append(
-            "swift --version did not report exact Swift 6.3.3 "
-            f"(output: {output!r})"
-        )
+    for executable in ("swift", "swiftc"):
+        returncode, output = _run_version(executable)
+        if returncode != 0:
+            errors.append(
+                f"{executable} --version failed with exit {returncode}: {output}"
+            )
+        elif not re.search(r"(?:Apple )?Swift version 6\.3\.3\b", output):
+            errors.append(
+                f"{executable} --version did not report exact Swift 6.3.3 "
+                f"(output: {output!r})"
+            )
 
 
 def _check_authored_text(errors: list[str]) -> None:
