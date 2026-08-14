@@ -5,8 +5,6 @@ public enum BigIntError: Error, Equatable {
   case negativeExponent
 }
 
-/// A signed arbitrary-precision integer stored as a normalized sign and
-/// little-endian base-2^32 magnitude.
 public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
   ExpressibleByIntegerLiteral
 {
@@ -109,11 +107,6 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     return sign < 0 ? -value : value
   }
 
-  /// Returns a bounded leading-bit approximation and its base-2 exponent.
-  ///
-  /// The approximation is intentionally kept internal: callers that need a
-  /// `Double` for an arbitrary-size integer can scale the bounded significand
-  /// without first overflowing the integer into infinity.
   var binaryApproximation: (significand: Double, exponent: Int) {
     guard !isZero, let topWord = words.last else { return (0, 0) }
     let topWordBits = 32 - topWord.leadingZeroBitCount
@@ -146,9 +139,7 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
       var sticky = false
       if guardIndex > 0 {
         let fullWords = guardIndex / 32
-        if words[..<fullWords].contains(where: { $0 != 0 }) {
-          sticky = true
-        }
+        if words[..<fullWords].contains(where: { $0 != 0 }) { sticky = true }
         let remainder = guardIndex % 32
         if !sticky && remainder > 0 {
           let mask = (UInt32(1) << UInt32(remainder)) - 1
@@ -226,8 +217,6 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     return BigInt(sign: lhs.sign * rhs.sign, words: result)
   }
 
-  /// Returns quotient and remainder using truncation toward zero. The
-  /// remainder is zero or has the dividend's sign.
   public func quotientAndRemainder(dividingBy divisor: BigInt) throws -> (
     quotient: BigInt, remainder: BigInt
   ) {
@@ -248,13 +237,11 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     try quotientAndRemainder(dividingBy: divisor).remainder
   }
 
-  /// R5RS-style modulo: a nonzero result has the divisor's sign.
   public func modulo(_ divisor: BigInt) throws -> BigInt {
     let remainder = try remainder(dividingBy: divisor)
     return !remainder.isZero && remainder.sign != divisor.sign ? remainder + divisor : remainder
   }
 
-  /// Fast unsigned helper used by parsing, printing, and divisibility checks.
   public func magnitudeModulo(_ divisor: UInt32) throws -> UInt32 {
     guard divisor != 0 else { throw BigIntError.divisionByZero }
     return Self.divideMagnitude(words, by: divisor).remainder
@@ -264,7 +251,6 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     var a = lhs.absoluteValue
     var b = rhs.absoluteValue
     while !b.isZero {
-      // b is known nonzero.
       let remainder = try! a.remainder(dividingBy: b)
       a = b
       b = remainder
@@ -285,7 +271,6 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     return result
   }
 
-  /// Returns floor(sqrt(self)) for nonnegative values.
   public func integerSquareRoot() -> BigInt? {
     guard sign >= 0 else { return nil }
     guard self > .one else { return self }
@@ -328,7 +313,6 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     return result
   }
 
-  /// Subtracts rhs from lhs; lhs must be at least rhs.
   private static func subtractMagnitudes(_ lhs: [UInt32], _ rhs: [UInt32]) -> [UInt32] {
     var result = lhs
     var borrow: UInt64 = 0
@@ -384,7 +368,6 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     return (quotient, UInt32(remainder))
   }
 
-  /// Knuth's normalized Algorithm D over base-2^32 words.
   private static func divideMagnitudes(_ dividend: [UInt32], by divisor: [UInt32]) -> (
     quotient: [UInt32], remainder: [UInt32]
   ) {

@@ -1,6 +1,6 @@
 import Foundation
 
-protocol SchemeHeapNode: AnyObject {
+package protocol SchemeHeapNode: AnyObject {
   func traceSchemeChildren(_ visit: (any SchemeHeapNode) -> Void)
   func breakSchemeCycles()
 }
@@ -17,7 +17,8 @@ public struct HeapStatistics: Equatable, Sendable {
   public let collected: Int
 }
 
-final class SchemeHeap {
+package final class SchemeHeap {
+  package init() {}
   private static let threadKey = "SwiftScheme.activeHeap"
   private var nodes: [ObjectIdentifier: WeakSchemeNode] = [:]
   private(set) var allocated = 0
@@ -25,7 +26,7 @@ final class SchemeHeap {
 
   static var active: SchemeHeap? { Thread.current.threadDictionary[threadKey] as? SchemeHeap }
 
-  func withActive<T>(_ body: () throws -> T) rethrows -> T {
+  package func withActive<T>(_ body: () throws -> T) rethrows -> T {
     let dictionary = Thread.current.threadDictionary
     let previous = dictionary[Self.threadKey]
     dictionary[Self.threadKey] = self
@@ -39,14 +40,14 @@ final class SchemeHeap {
     return try body()
   }
 
-  func register(_ node: any SchemeHeapNode) {
+  package func register(_ node: any SchemeHeapNode) {
     let identifier = ObjectIdentifier(node)
     guard nodes[identifier]?.value == nil else { return }
     nodes[identifier] = WeakSchemeNode(node)
     allocated += 1
   }
 
-  @discardableResult func collect(roots: [any SchemeHeapNode]) -> HeapStatistics {
+  @discardableResult package func collect(roots: [any SchemeHeapNode]) -> HeapStatistics {
     nodes = nodes.filter { $0.value.value != nil }
     var marked = Set<ObjectIdentifier>()
     var pending = roots
@@ -68,7 +69,7 @@ final class SchemeHeap {
     return statistics
   }
 
-  var statistics: HeapStatistics {
+  package var statistics: HeapStatistics {
     nodes = nodes.filter { $0.value.value != nil }
     return HeapStatistics(
       allocated: allocated,
@@ -79,6 +80,6 @@ final class SchemeHeap {
   }
 }
 
-@inline(__always) func registerSchemeNode(_ node: any SchemeHeapNode) {
+@inline(__always) package func registerSchemeNode(_ node: any SchemeHeapNode) {
   SchemeHeap.active?.register(node)
 }
