@@ -978,6 +978,16 @@ private func makeList<S: Sequence>(_ values: S, tail: Value = .empty) -> Value
 where S.Element == Value { Array(values).reversed().reduce(tail) { .pair(Pair($1, $0)) } }
 
 private let nonstandardSymbolPrefix = "\u{1}"
+private let internalSyntaxPrefix = "\u{2}r5rs:"
+
+private func internalSyntax(_ name: String) -> Value {
+  .symbol(internalSyntaxPrefix + name)
+}
+
+private func internalSyntaxName(_ value: Value) -> String? {
+  guard case .symbol(let name) = value, name.hasPrefix(internalSyntaxPrefix) else { return nil }
+  return String(name.dropFirst(internalSyntaxPrefix.count))
+}
 
 private func symbolToken(_ spelling: String) -> String {
   let canonical = spelling.lowercased()
@@ -1601,7 +1611,8 @@ private enum WindAction {
 private indirect enum Continuation {
   case halt
   case ifFrame(Value, Value, SchemeEnvironment, Continuation)
-  case beginFrame([Value], SchemeEnvironment, Continuation)
+  case beginFrame([Value], SchemeEnvironment, Bool, Continuation)
+  case expressionContext(Continuation)
   case discardFrame(Continuation)
   case setFrame(String, SchemeEnvironment, Continuation)
   case defineFrame(String, SchemeEnvironment, Continuation)
@@ -1661,9 +1672,11 @@ private func traceContinuation(_ continuation: Continuation, _ visit: (any Schem
     traceValue(b, visit)
     visit(environment)
     traceContinuation(next, visit)
-  case .beginFrame(let values, let environment, let next):
+  case .beginFrame(let values, let environment, _, let next):
     traceValues(values, visit)
     visit(environment)
+    traceContinuation(next, visit)
+  case .expressionContext(let next):
     traceContinuation(next, visit)
   case .discardFrame(let next):
     traceContinuation(next, visit)
@@ -1815,6 +1828,25 @@ public final class Interpreter {
     }
   }
 
+  private func coreProcedure(_ name: String) -> Value {
+    guard let value = report.cell(name)?.value else {
+      preconditionFailure("missing R5RS core procedure \(name)")
+    }
+    return value
+  }
+
+  private func coreCall(_ name: String, _ arguments: [Value]) -> Value {
+    makeList([coreProcedure(name)] + arguments)
+  }
+
+  private func coreKeyword(_ value: Value, in environment: SchemeEnvironment) -> String? {
+    if let name = internalSyntaxName(value) { return name }
+    guard case .symbol(let name) = value,
+      environment.cell(name) == nil && environment.macro(name) == nil
+    else { return nil }
+    return name
+  }
+
   private func expandMacros(_ rawExpression: Value, in environment: SchemeEnvironment) throws -> Value {
     var expression = rawExpression
     while case .pair(let pair) = expression, case .symbol(let head) = pair.car,
@@ -1826,7 +1858,9 @@ public final class Interpreter {
   private func isCoreForm(
     _ value: Value, _ name: String, in environment: SchemeEnvironment
   ) -> Bool {
-    guard case .pair(let pair) = value, isSymbol(pair.car, name) else { return false }
+    guard case .pair(let pair) = value else { return false }
+    if internalSyntaxName(pair.car) == name { return true }
+    guard isSymbol(pair.car, name) else { return false }
     // A value binding shadows a syntactic keyword. The macro check keeps raw
     // body forms consistent with the already-expanded expression path.
     return environment.cell(name) == nil && environment.macro(name) == nil
@@ -1980,6 +2014,14 @@ public final class Interpreter {
     return values[0]
   }
 
+  private func allowsDefinitions(in continuation: Continuation) -> Bool {
+    switch continuation {
+    case .halt: return true
+    case .beginFrame(_, _, let allowed, _): return allowed
+    default: return false
+    }
+  }
+
   private func run(_ initial: Control) throws -> [Value] {
     var control = initial
     var continuation: Continuation = .halt
@@ -2010,7 +2052,7 @@ public final class Interpreter {
         case .pair:
           let form = try array(from: expression, context: "expression")
           guard !form.isEmpty else { throw SchemeError.syntax("empty application") }
-          if case .symbol(let keyword) = form[0], environment.cell(keyword) == nil {
+          if let keyword = coreKeyword(form[0], in: environment) {
             switch keyword {
             case "quote":
               try require(form, 2, "quote")
@@ -2032,12 +2074,12 @@ public final class Interpreter {
               control = .expression(form[1], environment)
               continue
             case "begin":
-              if form.count == 1 {
-                control = .values([.unspecified])
-              } else {
-                continuation = .beginFrame(Array(form.dropFirst(2)), environment, continuation)
-                control = .expression(form[1], environment)
-              }
+              guard form.count > 1 else { throw SchemeError.syntax("begin requires an expression") }
+              let allowDefinitions = allowsDefinitions(in: continuation)
+              continuation = .beginFrame(
+                Array(form.dropFirst(2)), environment, allowDefinitions, continuation
+              )
+              control = .expression(form[1], environment)
               continue
             case "lambda":
               guard form.count >= 3 else {
@@ -2061,6 +2103,9 @@ public final class Interpreter {
             case "define":
               guard form.count >= 3 else {
                 throw SchemeError.syntax("define requires name and value")
+              }
+              guard allowsDefinitions(in: continuation) else {
+                throw SchemeError.syntax("definition is not valid in expression context")
               }
               try environment.requireDefinitionAllowed()
               if case .symbol(let name) = form[1] {
@@ -2099,6 +2144,9 @@ public final class Interpreter {
               continue
             case "define-syntax":
               try require(form, 3, "define-syntax")
+              guard allowsDefinitions(in: continuation) else {
+                throw SchemeError.syntax("syntax definition is not valid in expression context")
+              }
               try environment.requireDefinitionAllowed()
               let name = try identifier(form[1], "define-syntax")
               guard !isDefinitionBoundaryKeyword(name) else {
@@ -2129,7 +2177,7 @@ public final class Interpreter {
               }
               try prepareInternalDefinitions(body, in: local)
               try validateBody(body, context: keyword, in: local)
-              continuation = .beginFrame(Array(body.dropFirst()), local, continuation)
+              continuation = .beginFrame(Array(body.dropFirst()), local, true, continuation)
               control = .expression(body[0], local)
               continue
             case "set!":
@@ -2156,7 +2204,9 @@ public final class Interpreter {
               try prepareInternalDefinitions(body, in: bodyEnvironment)
               try validateBody(body, context: "letrec", in: bodyEnvironment)
               if entries.isEmpty {
-                continuation = .beginFrame(Array(form.dropFirst(3)), bodyEnvironment, continuation)
+                continuation = .beginFrame(
+                  Array(form.dropFirst(3)), bodyEnvironment, true, continuation
+                )
                 control = .expression(form[2], bodyEnvironment)
               } else {
                 continuation = .letrecFrame(
@@ -2177,13 +2227,14 @@ public final class Interpreter {
               control = .expression(expandOr(Array(form.dropFirst())), environment)
               continue
             case "cond":
+              guard form.count >= 2 else { throw SchemeError.syntax("cond requires a clause") }
               control = .expression(
                 try expandCond(Array(form.dropFirst()), environment),
                 environment
               )
               continue
             case "case":
-              control = .expression(try expandCase(form), environment)
+              control = .expression(try expandCase(form, environment), environment)
               continue
             case "do":
               control = .expression(try expandDo(form), environment)
@@ -2218,15 +2269,18 @@ public final class Interpreter {
         case .halt: return values
         case .ifFrame(let consequent, let alternate, let environment, let next):
           let test = try one(values, "if")
-          continuation = next
+          continuation = .expressionContext(next)
           control = .expression(isFalse(test) ? alternate : consequent, environment)
-        case .beginFrame(let rest, let environment, let next):
+        case .expressionContext(let next):
+          continuation = next
+          control = .values(values)
+        case .beginFrame(let rest, let environment, let allowed, let next):
           if rest.isEmpty {
             continuation = next
             control = .values(values)
           } else {
             _ = try one(values, "sequence")
-            continuation = .beginFrame(Array(rest.dropFirst()), environment, next)
+            continuation = .beginFrame(Array(rest.dropFirst()), environment, allowed, next)
             control = .expression(rest[0], environment)
           }
         case .discardFrame(let next):
@@ -2284,7 +2338,7 @@ public final class Interpreter {
             )
             control = .expression(entries[following].1, environment)
           } else {
-            continuation = .beginFrame(Array(body.dropFirst()), bodyEnvironment, next)
+            continuation = .beginFrame(Array(body.dropFirst()), bodyEnvironment, true, next)
             control = .expression(body[0], bodyEnvironment)
           }
         case .callValuesFrame(let consumer, let next):
@@ -2388,7 +2442,7 @@ public final class Interpreter {
           try prepareInternalDefinitions(body, in: local)
           try validateBody(body, context: "procedure body", in: local)
           guard let first = body.first else { throw SchemeError.syntax("empty procedure body") }
-          continuation = .beginFrame(Array(body.dropFirst()), local, continuation)
+          continuation = .beginFrame(Array(body.dropFirst()), local, true, continuation)
           control = .expression(first, local)
         case .continuation(let target):
           let common = zip(winds, target.winds).prefix { $0 === $1 }.count
@@ -2448,6 +2502,9 @@ public final class Interpreter {
             guard arguments.count >= 2 else {
               throw SchemeError.arity("map/for-each expects procedure and lists")
             }
+            guard case .procedure = arguments[0] else {
+              throw SchemeError.type("map/for-each expects a procedure")
+            }
             let lists = try arguments.dropFirst().map {
               try array(from: $0, context: "map/for-each argument")
             }
@@ -2474,7 +2531,7 @@ public final class Interpreter {
               control = .values([.unspecified])
             } else {
               continuation = .discardFrame(continuation)
-              continuation = .beginFrame(Array(forms.dropFirst()), global, continuation)
+              continuation = .beginFrame(Array(forms.dropFirst()), global, true, continuation)
               control = .expression(forms[0], global)
             }
           case .callWithInputFile, .withInputFromFile:
@@ -2688,11 +2745,12 @@ public final class Interpreter {
       let entries = try bindings(form[2], "named let")
       try ensureDistinct(entries, "named let")
       let lambda = makeList(
-        [.symbol("lambda"), makeList(entries.map { .symbol($0.0) })] + Array(form.dropFirst(3))
+        [internalSyntax("lambda"), makeList(entries.map { .symbol($0.0) })]
+          + Array(form.dropFirst(3))
       )
       let binding = makeList([.symbol(name), lambda])
       return makeList([
-        .symbol("letrec"), makeList([binding]), makeList([.symbol(name)] + entries.map(\.1))
+        internalSyntax("letrec"), makeList([binding]), makeList([.symbol(name)] + entries.map(\.1))
       ])
     }
     let entries = try bindings(form[1], "let")
@@ -2700,7 +2758,8 @@ public final class Interpreter {
     return makeList(
       [
         makeList(
-          [.symbol("lambda"), makeList(entries.map { .symbol($0.0) })] + Array(form.dropFirst(2))
+          [internalSyntax("lambda"), makeList(entries.map { .symbol($0.0) })]
+            + Array(form.dropFirst(2))
         )
       ] + entries.map(\.1)
     )
@@ -2709,10 +2768,12 @@ public final class Interpreter {
   private func expandLetStar(_ form: [Value]) throws -> Value {
     guard form.count >= 3 else { throw SchemeError.syntax("let* requires bindings and body") }
     let entries = try bindings(form[1], "let*")
-    if entries.isEmpty { return makeList([.symbol("let"), .empty] + Array(form.dropFirst(2))) }
-    var result = makeList([.symbol("begin")] + Array(form.dropFirst(2)))
+    if entries.isEmpty { return makeList([internalSyntax("let"), .empty] + Array(form.dropFirst(2))) }
+    var result = makeList([internalSyntax("begin")] + Array(form.dropFirst(2)))
     for entry in entries.reversed() {
-      result = makeList([.symbol("let"), makeList([makeList([.symbol(entry.0), entry.1])]), result])
+      result = makeList([
+        internalSyntax("let"), makeList([makeList([.symbol(entry.0), entry.1])]), result
+      ])
     }
     return result
   }
@@ -2721,7 +2782,7 @@ public final class Interpreter {
     guard let first = expressions.first else { return .boolean(true) }
     if expressions.count == 1 { return first }
     return makeList([
-      .symbol("if"), first, expandAnd(Array(expressions.dropFirst())), .boolean(false)
+      internalSyntax("if"), first, expandAnd(Array(expressions.dropFirst())), .boolean(false)
     ])
   }
 
@@ -2731,9 +2792,9 @@ public final class Interpreter {
     macroSerial += 1
     let temp = "or#\(macroSerial)"
     return makeList([
-      .symbol("let"), makeList([makeList([.symbol(temp), first])]),
+      internalSyntax("let"), makeList([makeList([.symbol(temp), first])]),
       makeList([
-        .symbol("if"), .symbol(temp), .symbol(temp), expandOr(Array(expressions.dropFirst()))
+        internalSyntax("if"), .symbol(temp), .symbol(temp), expandOr(Array(expressions.dropFirst()))
       ])
     ])
   }
@@ -2747,15 +2808,16 @@ public final class Interpreter {
       && isSymbol(clause[0], "else")
     if elseKeyword {
       guard clauses.count == 1 else { throw SchemeError.syntax("cond else must be last") }
-      return makeList([.symbol("begin")] + Array(clause.dropFirst()))
+      guard clause.count >= 2 else { throw SchemeError.syntax("cond else requires a body") }
+      return makeList([internalSyntax("begin")] + Array(clause.dropFirst()))
     }
     let rest = try expandCond(Array(clauses.dropFirst()), environment)
     if clause.count == 1 {
       macroSerial += 1
       let temp = "cond#\(macroSerial)"
       return makeList([
-        .symbol("let"), makeList([makeList([.symbol(temp), clause[0]])]),
-        makeList([.symbol("if"), .symbol(temp), .symbol(temp), rest])
+        internalSyntax("let"), makeList([makeList([.symbol(temp), clause[0]])]),
+        makeList([internalSyntax("if"), .symbol(temp), .symbol(temp), rest])
       ])
     }
     let arrowKeyword =
@@ -2765,16 +2827,17 @@ public final class Interpreter {
       macroSerial += 1
       let temp = "cond#\(macroSerial)"
       return makeList([
-        .symbol("let"), makeList([makeList([.symbol(temp), clause[0]])]),
-        makeList([.symbol("if"), .symbol(temp), makeList([clause[2], .symbol(temp)]), rest])
+        internalSyntax("let"), makeList([makeList([.symbol(temp), clause[0]])]),
+        makeList([internalSyntax("if"), .symbol(temp), makeList([clause[2], .symbol(temp)]), rest])
       ])
     }
     return makeList([
-      .symbol("if"), clause[0], makeList([.symbol("begin")] + Array(clause.dropFirst())), rest
+      internalSyntax("if"), clause[0],
+      makeList([internalSyntax("begin")] + Array(clause.dropFirst())), rest
     ])
   }
 
-  private func expandCase(_ form: [Value]) throws -> Value {
+  private func expandCase(_ form: [Value], _ environment: SchemeEnvironment) throws -> Value {
     guard form.count >= 3 else { throw SchemeError.syntax("case requires key and clauses") }
     macroSerial += 1
     let key = "case#\(macroSerial)"
@@ -2782,21 +2845,31 @@ public final class Interpreter {
       guard let first = remaining.first else { return .unspecified }
       let clause = try array(from: first, context: "case clause")
       guard clause.count >= 2 else { throw SchemeError.syntax("invalid case clause") }
-      if isSymbol(clause[0], "else") {
+      if isSymbol(clause[0], "else") && environment.cell("else") == nil
+        && environment.macro("else") == nil
+      {
         guard remaining.count == 1 else { throw SchemeError.syntax("case else must be last") }
-        return makeList([.symbol("begin")] + Array(clause.dropFirst()))
+        guard clause.count >= 2 else { throw SchemeError.syntax("case else requires a body") }
+        return makeList([internalSyntax("begin")] + Array(clause.dropFirst()))
       }
       let datums = try array(from: clause[0], context: "case datums")
+      for index in datums.indices {
+        guard !datums[(index + 1)...].contains(where: { eqv(datums[index], $0) }) else {
+          throw SchemeError.syntax("duplicate case datum")
+        }
+      }
       let tests = datums.map {
-        makeList([.symbol("eqv?"), .symbol(key), makeList([.symbol("quote"), $0])])
+        coreCall("eqv?", [.symbol(key), quoted($0)])
       }
       return makeList([
-        .symbol("if"), expandOr(tests), makeList([.symbol("begin")] + Array(clause.dropFirst())),
+        internalSyntax("if"), expandOr(tests),
+        makeList([internalSyntax("begin")] + Array(clause.dropFirst())),
         try clauses(remaining.dropFirst())
       ])
     }
     return makeList([
-      .symbol("let"), makeList([makeList([.symbol(key), form[1]])]), try clauses(form.dropFirst(2))
+      internalSyntax("let"), makeList([makeList([.symbol(key), form[1]])]),
+      try clauses(form.dropFirst(2))
     ])
   }
 
@@ -2813,21 +2886,22 @@ public final class Interpreter {
     macroSerial += 1
     let loop = "do#\(macroSerial)"
     let names = try specs.map { try identifier($0[0], "do") }
+    guard Set(names).count == names.count else { throw SchemeError.syntax("duplicate do variable") }
     let steps = zip(specs, names).map { $0.0.count == 3 ? $0.0[2] : .symbol($0.1) }
     let done =
-      test.count == 1 ? .unspecified : makeList([.symbol("begin")] + Array(test.dropFirst()))
+      test.count == 1 ? .unspecified : makeList([internalSyntax("begin")] + Array(test.dropFirst()))
     let recur = makeList([.symbol(loop)] + steps)
     let body = makeList([
-      .symbol("if"), test[0], done,
-      makeList([.symbol("begin")] + Array(form.dropFirst(3)) + [recur])
+      internalSyntax("if"), test[0], done,
+      makeList([internalSyntax("begin")] + Array(form.dropFirst(3)) + [recur])
     ])
     return makeList([
-      .symbol("let"), .symbol(loop),
+      internalSyntax("let"), .symbol(loop),
       makeList(zip(names, specs).map { makeList([.symbol($0.0), $0.1[1]]) }), body
     ])
   }
 
-  private func quoted(_ value: Value) -> Value { makeList([.symbol("quote"), value]) }
+  private func quoted(_ value: Value) -> Value { makeList([internalSyntax("quote"), value]) }
 
   private func expandQuasiquote(_ value: Value, depth: Int, _ environment: SchemeEnvironment) throws
     -> Value
@@ -2837,28 +2911,23 @@ public final class Interpreter {
       if name == "unquote" && active {
         return depth == 1
           ? form[1]
-          : makeList([
-            .symbol("list"), quoted(.symbol(name)),
+          : coreCall("list", [
+            quoted(.symbol(name)),
             try expandQuasiquote(form[1], depth: depth - 1, environment)
           ])
       }
       if name == "unquote-splicing" && active {
         guard depth > 1 else { throw SchemeError.syntax("unquote-splicing outside list context") }
-        return makeList([
-          .symbol("list"), quoted(.symbol(name)),
-          try expandQuasiquote(form[1], depth: depth - 1, environment)
-        ])
+        return coreCall("list", [quoted(.symbol(name)),
+          try expandQuasiquote(form[1], depth: depth - 1, environment)])
       }
       if name == "quasiquote" && active {
-        return makeList([
-          .symbol("list"), quoted(.symbol(name)),
-          try expandQuasiquote(form[1], depth: depth + 1, environment)
-        ])
+        return coreCall("list", [quoted(.symbol(name)),
+          try expandQuasiquote(form[1], depth: depth + 1, environment)])
       }
     }
     if case .vector(let vector) = value {
-      return makeList([
-        .symbol("list->vector"),
+      return coreCall("list->vector", [
         try expandQuasiquote(makeList(vector.elements), depth: depth, environment)
       ])
     }
@@ -2868,12 +2937,12 @@ public final class Interpreter {
       case .symbol("unquote-splicing") = form[0], depth == 1,
       environment.cell("unquote-splicing") == nil && environment.macro("unquote-splicing") == nil
     {
-      return makeList([
-        .symbol("append"), form[1], try expandQuasiquote(pair.cdr, depth: depth, environment)
+      return coreCall("append", [
+        form[1], try expandQuasiquote(pair.cdr, depth: depth, environment)
       ])
     }
-    return makeList([
-      .symbol("cons"), try expandQuasiquote(head, depth: depth, environment),
+    return coreCall("cons", [
+      try expandQuasiquote(head, depth: depth, environment),
       try expandQuasiquote(pair.cdr, depth: depth, environment)
     ])
   }
@@ -3100,12 +3169,17 @@ public final class Interpreter {
     primitive("expt", in: env) { args in
       try require(args, 2, "expt")
       let base = try schemeNumber(args[0])
-      if let exponent = try? exactInteger(args[1], "expt"), let e = exponent.exactInt {
+      let exponent = try schemeNumber(args[1])
+      if base.isZero {
+        let result = exponent.isZero ? SchemeNumber.one : SchemeNumber.zero
+        return numberValue(base.isExact && exponent.isExact ? result : result.inexact())
+      }
+      if let e = exactIntegerExponent(exponent) {
         do { return numberValue(try base.exactPower(e)) } catch {
           throw SchemeError.numeric("division by zero")
         }
       }
-      return numberValue(complexPower(base, try schemeNumber(args[1])))
+      return numberValue(complexPower(base, exponent))
     }
     primitive("sqrt", in: env) { args in
       try require(args, 1, "sqrt")
@@ -3387,31 +3461,33 @@ public final class Interpreter {
         guard args.count >= 2 else {
           throw SchemeError.arity("\(name) expects at least 2 arguments")
         }
-        var chars = try args.map { String(try character($0, name)) }
-        if name.contains("-ci") { chars = chars.map { $0.lowercased() } }
+        let characters = try args.map { try character($0, name) }
+        let chars: [String] = name.contains("-ci")
+          ? characters.map(scalarCaseKey)
+          : characters.map(String.init)
         return .boolean(zip(chars, chars.dropFirst()).allSatisfy { compare($0, $1, name) })
       }
     }
     primitive("char-alphabetic?", in: env) {
-      try charPredicate($0, "char-alphabetic?", { $0.isLetter })
+      try charPredicate($0, "char-alphabetic?", isScalarCaseCharacter)
     }
     primitive("char-numeric?", in: env) { try charPredicate($0, "char-numeric?", { $0.isNumber }) }
     primitive("char-whitespace?", in: env) {
       try charPredicate($0, "char-whitespace?", { $0.isWhitespace })
     }
     primitive("char-upper-case?", in: env) {
-      try charPredicate($0, "char-upper-case?", { $0.isUppercase })
+      try charPredicate($0, "char-upper-case?", { isScalarCaseCharacter($0) && $0.isUppercase })
     }
     primitive("char-lower-case?", in: env) {
-      try charPredicate($0, "char-lower-case?", { $0.isLowercase })
+      try charPredicate($0, "char-lower-case?", { isScalarCaseCharacter($0) && $0.isLowercase })
     }
     primitive("char-upcase", in: env) {
       try require($0, 1, "char-upcase")
-      return .character(String(try character($0[0], "char-upcase")).uppercased().first!)
+      return .character(scalarCaseMap(try character($0[0], "char-upcase"), upper: true))
     }
     primitive("char-downcase", in: env) {
       try require($0, 1, "char-downcase")
-      return .character(String(try character($0[0], "char-downcase")).lowercased().first!)
+      return .character(scalarCaseMap(try character($0[0], "char-downcase"), upper: false))
     }
 
     primitive("string", in: env) {
@@ -3735,6 +3811,13 @@ private func exactInteger(_ value: Value, _ context: String) throws -> BigInt {
   return n
 }
 
+private func exactIntegerExponent(_ number: SchemeNumber) -> Int? {
+  guard number.isExact, number.parts.imaginary.isZero,
+    case .exact(let rational) = number.parts.real, rational.isInteger
+  else { return nil }
+  return rational.numerator.exactInt
+}
+
 private func integerComponent(_ value: Value, _ context: String) throws -> (
   value: BigInt, inexact: Bool
 ) {
@@ -3995,6 +4078,35 @@ private func compare(_ lhs: String, _ rhs: String, _ name: String) -> Bool {
   if name.hasSuffix("<?") { return lhs < rhs }
   return lhs > rhs
 }
+
+private func scalarCaseMapping(_ character: Character, upper: Bool) -> String {
+  guard character.unicodeScalars.count == 1, let scalar = character.unicodeScalars.first else {
+    return String(character)
+  }
+  return upper ? scalar.properties.uppercaseMapping : scalar.properties.lowercaseMapping
+}
+
+private func hasScalarCaseMapping(_ character: Character, upper: Bool) -> Bool {
+  scalarCaseMapping(character, upper: upper).unicodeScalars.count == 1
+}
+
+private func isScalarCaseCharacter(_ character: Character) -> Bool {
+  character.isLetter && hasScalarCaseMapping(character, upper: true)
+    && hasScalarCaseMapping(character, upper: false)
+}
+
+private func scalarCaseMap(_ character: Character, upper: Bool) -> Character {
+  let mapped = scalarCaseMapping(character, upper: upper)
+  guard mapped.unicodeScalars.count == 1, let scalar = mapped.unicodeScalars.first else {
+    return character
+  }
+  return Character(String(scalar))
+}
+
+private func scalarCaseKey(_ character: Character) -> String {
+  scalarCaseMapping(character, upper: false)
+}
+
 private func charPredicate(_ args: [Value], _ name: String, _ test: (Character) -> Bool) throws
   -> Value
 {

@@ -55,6 +55,27 @@ struct R5RSIODataTests {
     #expect(result.written == "#t")
   }
 
+  @Test("character case conversion preserves R5RS character invariants")
+  func characterCaseConversion() throws {
+    let result = try evaluateIO(
+      """
+      (let ((check (lambda (c)
+                     (if (char-alphabetic? c)
+                         (let ((up (char-upcase c)) (down (char-downcase c)))
+                           (and (char-ci=? c up) (char-ci=? c down)
+                                (char-upper-case? up) (char-lower-case? down)
+                                (char=? up (integer->char (char->integer up)))
+                                (char=? down (integer->char (char->integer down)))))
+                         #t))))
+        (and (check #\\A) (check #\\a)
+             (char-ci=? #\\ß (char-upcase #\\ß))
+             (char-ci=? #\\İ (char-downcase #\\İ))
+             (char=? #\\İ (integer->char (char->integer (char-downcase #\\İ))))))
+      """
+    )
+    #expect(result.written == "#t")
+  }
+
   @Test("read-created pairs, strings, and vectors remain mutable")
   func readValuesAreMutable() throws {
     #expect(

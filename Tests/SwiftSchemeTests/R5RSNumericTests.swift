@@ -137,6 +137,16 @@ import Testing
     for (expression, label) in invalid { try r5rsExpectError(expression, label) }
   }
 
+  @Test("expt follows zero-base and exact-integer exponent rules") @MainActor
+  func exptZeroAndExactIntegerComplexExponent() throws {
+    let result = try r5rsEvaluate(
+      "(list (expt 0 -1) (expt 0 1/2) (expt 0 0) (expt 0 0+0i) "
+        + "(expt 0.0 1) (expt 0.0 0.0) (expt 2 3+0i) "
+        + "(exact? (expt 2 3+0i)))"
+    )
+    #expect(result.written == "(0 0 1 1 0.0 1.0 8 #t)")
+  }
+
   @Test("numeric-programs fixture captures its complete output") @MainActor
   func numericProgramsFixture() throws {
     let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
