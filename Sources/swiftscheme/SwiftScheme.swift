@@ -2048,6 +2048,17 @@ public final class Interpreter {
       }
     }
 
+    func tailContinuation(_ continuation: Continuation) -> Continuation {
+      var current = continuation
+      while true {
+        switch current {
+        case .expressionContext(let next): current = next
+        case .beginFrame(let rest, _, _, let next) where rest.isEmpty: current = next
+        default: return current
+        }
+      }
+    }
+
     while true {
       switch control {
       case .expression(let rawExpression, let environment):
@@ -2264,6 +2275,8 @@ public final class Interpreter {
           }
           continuation = .operatorFrame(Array(form.dropFirst()), environment, continuation)
           control = .expression(form[0], environment)
+        case .empty, .vector:
+          throw SchemeError.syntax("invalid expression")
         default:
           let literal = expression
           var seen = Set<ObjectIdentifier>()
@@ -2449,7 +2462,9 @@ public final class Interpreter {
           try prepareInternalDefinitions(body, in: local)
           try validateBody(body, context: "procedure body", in: local)
           guard let first = body.first else { throw SchemeError.syntax("empty procedure body") }
-          continuation = .beginFrame(Array(body.dropFirst()), local, true, continuation)
+          continuation = .beginFrame(
+            Array(body.dropFirst()), local, true, tailContinuation(continuation)
+          )
           control = .expression(first, local)
         case .continuation(let target):
           let common = zip(winds, target.winds).prefix { $0 === $1 }.count
@@ -3265,7 +3280,7 @@ public final class Interpreter {
       let radix = args.count == 2 ? try indexRadix(args[1], "string->number") : 10
       let text = try schemeString(args[0], "string->number").string
       var reader = Reader(
-        text.hasPrefix("#") || radix == 10
+        hasRadixPrefix(text) || radix == 10
           ? text : "#\(radix == 2 ? "b" : radix == 8 ? "o" : "x")\(text)"
       )
       guard let values = try? reader.readAll(), values.count == 1, let value = values.first,
@@ -4152,6 +4167,19 @@ private func scalarCaseKey(_ character: Character) -> String {
     }
   }
   return keys.min() ?? String(character)
+}
+
+private func hasRadixPrefix(_ text: String) -> Bool {
+  let characters = Array(text.lowercased())
+  var index = 0
+  while index + 1 < characters.count, characters[index] == "#" {
+    switch characters[index + 1] {
+    case "b", "o", "d", "x": return true
+    case "e", "i": index += 2
+    default: return false
+    }
+  }
+  return false
 }
 
 private func charPredicate(_ args: [Value], _ name: String, _ test: (Character) -> Bool) throws

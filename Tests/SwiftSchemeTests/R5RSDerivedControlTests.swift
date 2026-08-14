@@ -67,6 +67,14 @@ struct R5RSDerivedControlTests {
     expectDerivedError("(for-each 1 '())", "for-each procedure")
   }
 
+  @Test("R5RS §6.5 eval rejects non-expression data")
+  func evalExpressionDomains() {
+    expectDerivedError("(eval '() (null-environment 5))", "eval empty list")
+    expectDerivedError("(eval '#(1 2) (null-environment 5))", "eval vector datum")
+    expectDerivedError("()", "empty application")
+    expectDerivedError("#(1 2)", "vector expression")
+  }
+
   @Test("generated syntax and temporary identifiers remain opaque through eval")
   func generatedTokensRemainOpaque() throws {
     let result = try evaluateDerived(

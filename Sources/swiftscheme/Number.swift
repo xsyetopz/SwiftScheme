@@ -252,7 +252,11 @@ public enum SchemeNumber: Hashable, Sendable, CustomStringConvertible {
         return rational.isInteger
           ? numerator : numerator + "/" + rational.denominator.string(radix: radix)
       case .inexact(let number):
-        guard radix == 10 else { return nil }
+        guard radix == 10 else {
+          guard let rational = Rational.fromFiniteDouble(number) else { return nil }
+          let numerator = (rational.numerator * BigInt(radix)).string(radix: radix)
+          return numerator + "/" + rational.denominator.string(radix: radix) + "#"
+        }
         return Self.describe(.inexact(number))
       }
     }

@@ -155,6 +155,31 @@ import Testing
     #expect(result.written == "(\"ff\" 255)")
   }
 
+  @Test("string->number keeps the default radix after an exactness prefix") @MainActor
+  func stringNumberHonorsDefaultRadixWithExactnessPrefix() throws {
+    let result = try r5rsEvaluate(
+      "(list (string->number \"#e11/10\" 2) "
+        + "(string->number \"#i11/10\" 2) "
+        + "(string->number \"#e1.5\" 2) "
+        + "(string->number \"#i1.5\" 2) "
+        + "(string->number \"#b11/10\" 16))"
+    )
+    #expect(result.written == "(3/2 1.5 #f #f 3/2)")
+  }
+
+  @Test("finite inexact number->string values round-trip in non-decimal radices")
+  @MainActor func numberStringFiniteInexactNonDecimalRoundTrips() throws {
+    let result = try r5rsEvaluate(
+      "(let ((roundtrip (lambda (value radix) "
+        + "(let ((text (number->string value radix))) "
+        + "(list (eqv? value (string->number text radix)) "
+        + "(inexact? (string->number text radix))))))) "
+        + "(list (roundtrip 1.5 2) (roundtrip 1.5 8) "
+        + "(roundtrip 1.5 16) (roundtrip 0.5 2)))"
+    )
+    #expect(result.written == "((#t #t) (#t #t) (#t #t) (#t #t))")
+  }
+
   @Test("signed-zero branch cuts stay inside the R5RS angle range") @MainActor
   func signedZeroBranchCuts() throws {
     let result = try r5rsEvaluate(
