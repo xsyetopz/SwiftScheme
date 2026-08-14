@@ -3580,9 +3580,15 @@ public final class Interpreter {
         guard args.count >= 2 else {
           throw SchemeError.arity("\(name) expects at least 2 arguments")
         }
-        var strings = try args.map { try schemeString($0, name).string }
-        if name.contains("-ci") { strings = strings.map(scalarCaseStringKey) }
-        return .boolean(zip(strings, strings.dropFirst()).allSatisfy { compare($0, $1, name) })
+        let values = try args.map { try schemeString($0, name) }
+        let keys = values.map { value in
+          value.characters.map(name.contains("-ci") ? scalarCaseKey : String.init)
+        }
+        return .boolean(
+          zip(keys, keys.dropFirst()).allSatisfy {
+            compareCharacterKeys($0, $1, name)
+          }
+        )
       }
     }
 
@@ -4096,6 +4102,17 @@ private func compare(_ lhs: String, _ rhs: String, _ name: String) -> Bool {
   return lhs > rhs
 }
 
+private func compareCharacterKeys(_ lhs: [String], _ rhs: [String], _ name: String) -> Bool {
+  for (left, right) in zip(lhs, rhs) where left != right {
+    return compare(left, right, name)
+  }
+  if name.hasSuffix("<=?") { return lhs.count <= rhs.count }
+  if name.hasSuffix(">=?") { return lhs.count >= rhs.count }
+  if name.hasSuffix("=?") { return lhs.count == rhs.count }
+  if name.hasSuffix("<?") { return lhs.count < rhs.count }
+  return lhs.count > rhs.count
+}
+
 private func scalarCaseMapping(_ character: Character, upper: Bool) -> String {
   guard character.unicodeScalars.count == 1, let scalar = character.unicodeScalars.first else {
     return String(character)
@@ -4135,10 +4152,6 @@ private func scalarCaseKey(_ character: Character) -> String {
     }
   }
   return keys.min() ?? String(character)
-}
-
-private func scalarCaseStringKey(_ string: String) -> String {
-  string.map(scalarCaseKey).joined()
 }
 
 private func charPredicate(_ args: [Value], _ name: String, _ test: (Character) -> Bool) throws

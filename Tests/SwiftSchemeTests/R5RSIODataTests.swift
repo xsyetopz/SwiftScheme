@@ -92,6 +92,30 @@ struct R5RSIODataTests {
     #expect(result.written == "(#t #t #t #t #f #t)")
   }
 
+  @Test("R5RS §6.3.5 string-ci preserves stored character boundaries")
+  func stringCaseOrderingPreservesCharacterBoundaries() throws {
+    let equality = try evaluateIO(
+      "(let ((a (make-string 2 #\\a)) (b (make-string 2 #\\a)) "
+        + "(mark (integer->char 768))) "
+        + "(string-set! b 0 #\\A) (string-set! a 1 mark) "
+        + "(string-set! b 1 mark) "
+        + "(list (string-length a) (string-length b) "
+        + "(char-ci=? (string-ref a 0) (string-ref b 0)) "
+        + "(char-ci=? (string-ref a 1) (string-ref b 1)) "
+        + "(string-ci=? a b)))"
+    )
+    #expect(equality.written == "(2 2 #t #t #t)")
+
+    let ordering = try evaluateIO(
+      "(let ((a (make-string 2 #\\a)) (b (make-string 2 #\\a)) "
+        + "(grave (integer->char 768)) (overline (integer->char 773))) "
+        + "(string-set! a 1 grave) (string-set! b 1 overline) "
+        + "(list (char-ci<? grave overline) (string-ci<? a b) "
+        + "(char-ci>? grave overline) (string-ci>? a b)))"
+    )
+    #expect(ordering.written == "(#t #t #f #f)")
+  }
+
   @Test("R5RS §6.3.2 list consumers reject non-list and improper arguments")
   func listArgumentDomains() {
     expectIOError("(list-tail 1 0)", "list-tail scalar domain")
