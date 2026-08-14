@@ -26,6 +26,7 @@ public enum SchemeError: Error, Equatable, CustomStringConvertible {
 public final class Pair: SchemeHeapNode {
   public var car: Value
   public var cdr: Value
+  fileprivate var isLiteral = false
   public init(_ car: Value, _ cdr: Value) {
     self.car = car
     self.cdr = cdr
@@ -43,12 +44,14 @@ public final class Pair: SchemeHeapNode {
 
 public final class SchemeString {
   public var characters: [Character]
+  fileprivate var isLiteral = false
   public init(_ value: String) { characters = Array(value) }
   public var string: String { String(characters) }
 }
 
 public final class SchemeVector: SchemeHeapNode {
   public var elements: [Value]
+  fileprivate var isLiteral = false
   public init(_ elements: [Value]) {
     self.elements = elements
     registerSchemeNode(self)
@@ -118,15 +121,25 @@ private final class Cell: SchemeHeapNode {
   func breakSchemeCycles() { value = .undefined }
 }
 
+fileprivate enum DefinitionPolicy {
+  case mutable
+  case fixed
+}
+
 public final class SchemeEnvironment: SchemeHeapNode {
   fileprivate var parent: SchemeEnvironment?
+  fileprivate let definitionPolicy: DefinitionPolicy
   fileprivate var values: [String: Cell] = [:]
   fileprivate var symbolSpellings: [String: String] = [:]
   fileprivate var aliases: [String: Cell] = [:]
   fileprivate var macros: [String: SyntaxRules] = [:]
 
-  fileprivate init(parent: SchemeEnvironment? = nil) {
+  fileprivate init(
+    parent: SchemeEnvironment? = nil,
+    definitionPolicy: DefinitionPolicy = .mutable
+  ) {
     self.parent = parent
+    self.definitionPolicy = definitionPolicy
     registerSchemeNode(self)
   }
   func traceSchemeChildren(_ visit: (any SchemeHeapNode) -> Void) {
@@ -148,6 +161,11 @@ public final class SchemeEnvironment: SchemeHeapNode {
     let canonical = name.lowercased()
     if name != canonical { symbolSpellings[canonical] = name }
     if let cell = values[canonical] { cell.value = value } else { values[canonical] = Cell(value) }
+  }
+  fileprivate func requireDefinitionAllowed() throws {
+    if case .fixed = definitionPolicy {
+      throw SchemeError.syntax("definitions are not allowed in this environment")
+    }
   }
   fileprivate func fillPlaceholder(_ name: String, _ value: Value) -> Bool {
     if let cell = values[name], case .undefined = cell.value {
@@ -437,9 +455,6 @@ private struct Reader {
         }
         switch escaped {
         case "\"", "\\": result.append(escaped)
-        case "n": result.append("\n")
-        case "r": result.append("\r")
-        case "t": result.append("\t")
         default:
           throw SchemeError.lexical(
             "invalid string escape \\\(escaped)",
@@ -478,6 +493,13 @@ private struct Reader {
   private mutating func atom(starting first: Character) throws -> Value {
     var token = String(first)
     while let character = current, !isDelimiter(character) { token.append(advance()!) }
+    if token.contains(where: { "[]{}|".contains($0) }) {
+      throw SchemeError.lexical(
+        "reserved character in token \(token)",
+        line: line,
+        column: column - token.count
+      )
+    }
     let folded = token.lowercased()
     if folded == "#t" { return .boolean(true) }
     if folded == "#f" { return .boolean(false) }
@@ -503,19 +525,36 @@ private struct Reader {
         column: column - token.count
       )
     }
+    guard isIdentifier(token) else {
+      throw SchemeError.lexical(
+        "invalid identifier \(token)",
+        line: line,
+        column: column - token.count
+      )
+    }
     if token != folded { spellings[folded] = token }
     return .symbol(folded)
+  }
+
+  private enum NumericExactness {
+    case unspecified
+    case exact
+    case inexact
+  }
+
+  private struct ParsedInteger {
+    let value: BigInt
+    let hasPlaceholder: Bool
   }
 
   private func parseNumber(_ raw: String) -> Value? {
     var token = raw.lowercased()
     var radix = 10
-    var forceExact = false
-    var forceInexact = false
+    var exactness = NumericExactness.unspecified
     var radixSeen = false
     var exactnessSeen = false
     while token.hasPrefix("#") {
-      if token.count < 2 { return nil }
+      guard token.count >= 2 else { return nil }
       switch token[token.index(after: token.startIndex)] {
       case "b", "o", "d", "x":
         guard !radixSeen else { return nil }
@@ -524,74 +563,275 @@ private struct Reader {
         radixSeen = true
       case "e", "i":
         guard !exactnessSeen else { return nil }
-        forceExact = token.hasPrefix("#e")
-        forceInexact = token.hasPrefix("#i")
+        exactness = token.hasPrefix("#e") ? .exact : .inexact
         exactnessSeen = true
       default: return nil
       }
       token.removeFirst(2)
     }
     guard !token.isEmpty else { return nil }
+    guard let parsed = parseComplex(token, radix: radix, exactness: exactness) else { return nil }
+    return value(from: parsed)
+  }
 
-    let inexactSyntax = token.contains(".") || token.contains(where: { "esfdl#".contains($0) })
-    func component(_ text: String) -> RealComponent? {
-      if let slash = text.firstIndex(of: "/") {
-        guard let numerator = BigInt(String(text[..<slash]), radix: radix),
-          let denominator = BigInt(String(text[text.index(after: slash)...]), radix: radix),
-          let rational = Rational(numerator, denominator)
-        else { return nil }
-        return forceInexact ? .inexact(rational.doubleValue) : .exact(rational)
-      }
-      if radix != 10 {
-        guard let integer = BigInt(text, radix: radix) else { return nil }
-        return forceInexact ? .inexact(integer.doubleValue) : .exact(Rational(integer)!)
-      }
-      if !inexactSyntax, let integer = BigInt(text) {
-        return forceInexact ? .inexact(integer.doubleValue) : .exact(Rational(integer)!)
-      }
-      let normalized = text.map { "sfdl".contains($0) ? "e" : $0 }
-      if forceExact {
-        guard !text.contains("#"), let rational = exactDecimal(String(normalized)) else {
-          return nil
-        }
-        return .exact(rational)
-      }
-      let replaced = String(normalized).replacingOccurrences(of: "#", with: "0")
-      guard let real = Double(replaced) else { return nil }
-      return .inexact(real)
-    }
-
-    if token.hasSuffix("i") {
-      let body = String(token.dropLast())
-      if body == "+" || body == "-" {
-        return .complex(
-          real: .exact(Rational(0)),
-          imaginary: .exact(Rational(body == "+" ? 1 : -1))
-        )
-      }
-      var split: String.Index?
-      for index in body.indices.dropFirst() where (body[index] == "+" || body[index] == "-") {
-        let previous = body[body.index(before: index)]
-        if !"esfdl".contains(previous) { split = index }
-      }
-      let realText = split.map { String(body[..<$0]) } ?? "0"
-      let imaginaryText = split.map { String(body[$0...]) } ?? body
-      guard let real = component(realText), let imaginary = component(imaginaryText) else {
-        return nil
-      }
-      return .complex(real: real, imaginary: imaginary)
-    }
+  private func parseComplex(
+    _ token: String, radix: Int, exactness: NumericExactness
+  ) -> SchemeNumber? {
     if let at = token.firstIndex(of: "@") {
       guard token[token.index(after: at)...].firstIndex(of: "@") == nil,
-        let magnitude = component(String(token[..<at])),
-        let angle = component(String(token[token.index(after: at)...]))
+        let magnitude = parseReal(String(token[..<at]), radix: radix, exactness: exactness),
+        let angle = parseReal(String(token[token.index(after: at)...]), radix: radix, exactness: exactness)
       else { return nil }
       var number = SchemeNumber.polar(magnitude: magnitude, angle: angle)
-      if forceInexact { number = number.inexact() }
-      return value(from: number)
+      if exactness == .inexact { number = number.inexact() }
+      return number
     }
-    guard let parsed = component(token) else { return nil }
-    return value(from: .real(parsed))
+
+    guard token.last == "i" else {
+      return parseReal(token, radix: radix, exactness: exactness).map(SchemeNumber.real)
+    }
+
+    let body = String(token.dropLast())
+    guard !body.isEmpty else { return nil }
+    if body == "+" || body == "-" {
+      return .complex(
+        real: .exact(Rational(0)),
+        imaginary: implicitImaginaryUnit(body.first!, exactness: exactness)
+      )
+    }
+
+    let characters = Array(body)
+    guard characters.count > 1 else { return nil }
+    for index in 1..<characters.count where characters[index] == "+" || characters[index] == "-" {
+      let realText = String(characters[..<index])
+      let imaginaryText = String(characters[(index + 1)...])
+      guard let real = parseReal(realText, radix: radix, exactness: exactness) else { continue }
+      let imaginary: RealComponent?
+      if imaginaryText.isEmpty {
+        imaginary = implicitImaginaryUnit(characters[index], exactness: exactness)
+      } else {
+        imaginary = parseUnsignedReal(imaginaryText, radix: radix, exactness: exactness).map {
+          characters[index] == "+" ? $0 : -$0
+        }
+      }
+      if let imaginary { return .complex(real: real, imaginary: imaginary) }
+    }
+
+    if characters.first == "+" || characters.first == "-" {
+      let sign = characters[0]
+      let magnitude = String(characters.dropFirst())
+      guard let imaginary = parseUnsignedReal(magnitude, radix: radix, exactness: exactness)
+      else { return nil }
+      return .complex(
+        real: .exact(Rational(0)),
+        imaginary: sign == "+" ? imaginary : -imaginary
+      )
+    }
+    return nil
+  }
+
+  private func implicitImaginaryUnit(
+    _ sign: Character, exactness: NumericExactness
+  ) -> RealComponent {
+    let value = sign == "+" ? 1.0 : -1.0
+    return exactness == .inexact ? .inexact(value) : .exact(Rational(Int64(value)))
+  }
+
+  private func parseReal(
+    _ text: String, radix: Int, exactness: NumericExactness
+  ) -> RealComponent? {
+    guard let first = text.first else { return nil }
+    if first == "+" || first == "-" {
+      let magnitude = String(text.dropFirst())
+      guard let value = parseUnsignedReal(magnitude, radix: radix, exactness: exactness) else {
+        return nil
+      }
+      return first == "-" ? -value : value
+    }
+    return parseUnsignedReal(text, radix: radix, exactness: exactness)
+  }
+
+  private func parseUnsignedReal(
+    _ text: String, radix: Int, exactness: NumericExactness
+  ) -> RealComponent? {
+    guard !text.isEmpty else { return nil }
+    let slashParts = text.split(separator: "/", omittingEmptySubsequences: false)
+    if text.contains("/") {
+      guard slashParts.count == 2,
+        let numerator = parseUnsignedInteger(String(slashParts[0]), radix: radix),
+        let denominator = parseUnsignedInteger(String(slashParts[1]), radix: radix),
+        let rational = Rational(numerator.value, denominator.value)
+      else { return nil }
+      guard exactness != .exact || (!numerator.hasPlaceholder && !denominator.hasPlaceholder) else {
+        return nil
+      }
+      let inexact = exactness == .inexact || numerator.hasPlaceholder || denominator.hasPlaceholder
+      return inexact ? .inexact(rational.doubleValue) : .exact(rational)
+    }
+
+    if radix != 10 {
+      guard let integer = parseUnsignedInteger(text, radix: radix) else { return nil }
+      guard exactness != .exact || !integer.hasPlaceholder else { return nil }
+      return exactness == .inexact || integer.hasPlaceholder
+        ? .inexact(integer.value.doubleValue)
+        : .exact(Rational(integer.value)!)
+    }
+
+    return parseDecimalReal(text, exactness: exactness)
+  }
+
+  private func parseUnsignedInteger(_ text: String, radix: Int) -> ParsedInteger? {
+    guard !text.isEmpty else { return nil }
+    var sawDigit = false
+    var sawPlaceholder = false
+    for character in text {
+      if character == "#" {
+        sawPlaceholder = true
+      } else {
+        guard isDigit(character, radix: radix), !sawPlaceholder else { return nil }
+        sawDigit = true
+      }
+    }
+    guard sawDigit else { return nil }
+    let normalized = text.replacingOccurrences(of: "#", with: "0")
+    guard let value = BigInt(normalized, radix: radix) else { return nil }
+    return ParsedInteger(value: value, hasPlaceholder: sawPlaceholder)
+  }
+
+  private func parseDecimalReal(
+    _ text: String, exactness: NumericExactness
+  ) -> RealComponent? {
+    let characters = Array(text)
+    var exponentIndex: Int?
+    for index in characters.indices where "esfdl".contains(characters[index]) {
+      guard exponentIndex == nil else { return nil }
+      exponentIndex = index
+    }
+
+    let mantissa: String
+    let exponentText: String?
+    let exponentMarker: Character?
+    if let exponentIndex {
+      guard exponentIndex > 0, exponentIndex + 1 < characters.count else { return nil }
+      mantissa = String(characters[..<exponentIndex])
+      exponentMarker = characters[exponentIndex]
+      exponentText = String(characters[(exponentIndex + 1)...])
+      guard validExponent(exponentText!) else { return nil }
+    } else {
+      mantissa = text
+      exponentText = nil
+      exponentMarker = nil
+    }
+
+    guard let decimal = parseDecimalMantissa(mantissa) else { return nil }
+    let hasExponent = exponentText != nil
+    let inexactSyntax = decimal.hasPlaceholder || hasExponent || decimal.hasDot
+    guard exactness != .exact || !decimal.hasPlaceholder else { return nil }
+
+    let normalizedMantissa = decimal.normalized
+    let normalized = normalizedMantissa + (exponentMarker.map { String($0) } ?? "")
+      + (exponentText ?? "")
+    if exactness == .exact {
+      guard let rational = exactDecimal(normalized) else { return nil }
+      return .exact(rational)
+    }
+    if !inexactSyntax, let integer = BigInt(normalized, radix: 10) {
+      return exactness == .inexact
+        ? .inexact(integer.doubleValue)
+        : .exact(Rational(integer)!)
+    }
+    let doubleText = normalized
+      .replacingOccurrences(of: "s", with: "e")
+      .replacingOccurrences(of: "f", with: "e")
+      .replacingOccurrences(of: "d", with: "e")
+      .replacingOccurrences(of: "l", with: "e")
+    guard let real = Double(doubleText) else { return nil }
+    return .inexact(real)
+  }
+
+  private struct DecimalMantissa {
+    let normalized: String
+    let hasPlaceholder: Bool
+    let hasDot: Bool
+  }
+
+  private func parseDecimalMantissa(_ text: String) -> DecimalMantissa? {
+    let characters = Array(text)
+    let dots = characters.indices.filter { characters[$0] == "." }
+    guard dots.count <= 1 else { return nil }
+    if dots.isEmpty {
+      guard let integer = parseUnsignedInteger(text, radix: 10) else { return nil }
+      return DecimalMantissa(
+        normalized: integer.value.description,
+        hasPlaceholder: integer.hasPlaceholder,
+        hasDot: false
+      )
+    }
+
+    let dot = dots[0]
+    let before = String(characters[..<dot])
+    let after = String(characters[(dot + 1)...])
+    if before.isEmpty {
+      guard let right = decimalDigitHashRun(after, requireDigit: true) else { return nil }
+      return DecimalMantissa(
+        normalized: "." + right.normalized,
+        hasPlaceholder: right.hasPlaceholder,
+        hasDot: true
+      )
+    }
+
+    guard let left = decimalDigitHashRun(before, requireDigit: true),
+      let right = decimalDigitHashRun(after, requireDigit: false),
+      !left.hasPlaceholder || right.digitCount == 0
+    else { return nil }
+    return DecimalMantissa(
+      normalized: left.normalized + "." + right.normalized,
+      hasPlaceholder: left.hasPlaceholder || right.hasPlaceholder,
+      hasDot: true
+    )
+  }
+
+  private struct DecimalDigitHashRun {
+    let normalized: String
+    let digitCount: Int
+    let hasPlaceholder: Bool
+  }
+
+  private func decimalDigitHashRun(_ text: String, requireDigit: Bool) -> DecimalDigitHashRun? {
+    guard !requireDigit || !text.isEmpty else { return nil }
+    var sawPlaceholder = false
+    var digitCount = 0
+    for character in text {
+      if character == "#" {
+        sawPlaceholder = true
+      } else {
+        guard character.isASCII, character.isNumber, !sawPlaceholder else { return nil }
+        digitCount += 1
+      }
+    }
+    guard !requireDigit || digitCount > 0 else { return nil }
+    return DecimalDigitHashRun(
+      normalized: text.replacingOccurrences(of: "#", with: "0"),
+      digitCount: digitCount,
+      hasPlaceholder: sawPlaceholder
+    )
+  }
+
+  private func validExponent(_ text: String) -> Bool {
+    let characters = Array(text)
+    guard !characters.isEmpty else { return false }
+    let start = characters.first == "+" || characters.first == "-" ? 1 : 0
+    guard start < characters.count else { return false }
+    return characters[start...].allSatisfy { $0.isASCII && $0.isNumber }
+  }
+
+  private func isDigit(_ character: Character, radix: Int) -> Bool {
+    guard character.isASCII else { return false }
+    switch character {
+    case "0"..."9": return Int(String(character))! < radix
+    case "a"..."f": return radix == 16
+    default: return false
+    }
   }
 
   private func exactDecimal(_ text: String) -> Rational? {
@@ -599,7 +839,9 @@ private struct Reader {
     let mantissa = exponentIndex.map { String(text[..<$0]) } ?? text
     let exponent: Int
     if let exponentIndex {
-      guard let parsed = Int(text[text.index(after: exponentIndex)...]) else { return nil }
+      guard let parsed = Int(text[text.index(after: exponentIndex)...]), parsed != Int.min else {
+        return nil
+      }
       exponent = parsed
     } else {
       exponent = 0
@@ -612,9 +854,11 @@ private struct Reader {
     let digits = pieces.joined()
     guard var significand = BigInt(digits) else { return nil }
     if negative { significand = -significand }
+    let fractionalDigits = pieces.count == 2 ? pieces[1].count : 0
+    if exponent < 0 && fractionalDigits > Int.max + exponent { return nil }
     return Rational.exactDecimal(
       significand: significand,
-      fractionalDigits: pieces.count == 2 ? pieces[1].count : 0,
+      fractionalDigits: fractionalDigits,
       exponent: exponent
     )
   }
@@ -635,6 +879,25 @@ private struct Reader {
       return token.dropFirst().first?.isNumber == true || token.dropFirst().first == "."
     }
     return first == "." && token.dropFirst().first?.isNumber == true
+  }
+
+  private func isIdentifier(_ token: String) -> Bool {
+    if token == "+" || token == "-" || token == "..." { return true }
+    guard let first = token.first, isIdentifierInitial(first) else { return false }
+    return token.dropFirst().allSatisfy(isIdentifierSubsequent)
+  }
+
+  private func isIdentifierInitial(_ character: Character) -> Bool {
+    switch character {
+    case "a"..."z", "A"..."Z": return true
+    default: return "!$%&*/:<=>?^_~".contains(character)
+    }
+  }
+
+  private func isIdentifierSubsequent(_ character: Character) -> Bool {
+    isIdentifierInitial(character)
+      || (character.isASCII && character.isNumber)
+      || "+-.@".contains(character)
   }
 
   private func peek(_ distance: Int) -> Character? {
@@ -672,8 +935,7 @@ private enum Writer {
         + value.string.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(
           of: "\"",
           with: "\\\""
-        ).replacingOccurrences(of: "\n", with: "\\n").replacingOccurrences(of: "\r", with: "\\r")
-        .replacingOccurrences(of: "\t", with: "\\t") + "\""
+        ) + "\""
     case .vector(let vector):
       let identifier = ObjectIdentifier(vector)
       guard active.insert(identifier).inserted else { return "#<cycle>" }
@@ -715,6 +977,22 @@ private enum Writer {
 private func makeList<S: Sequence>(_ values: S, tail: Value = .empty) -> Value
 where S.Element == Value { Array(values).reversed().reduce(tail) { .pair(Pair($1, $0)) } }
 
+private func markLiteral(_ value: Value, _ seen: inout Set<ObjectIdentifier>) {
+  switch value {
+  case .pair(let pair):
+    guard seen.insert(ObjectIdentifier(pair)).inserted else { return }
+    pair.isLiteral = true
+    markLiteral(pair.car, &seen)
+    markLiteral(pair.cdr, &seen)
+  case .vector(let vector):
+    guard seen.insert(ObjectIdentifier(vector)).inserted else { return }
+    vector.isLiteral = true
+    vector.elements.forEach { markLiteral($0, &seen) }
+  case .string(let string): string.isLiteral = true
+  default: break
+  }
+}
+
 private func array(from list: Value, context: String = "list") throws -> [Value] {
   var values: [Value] = []
   var cursor = list
@@ -733,6 +1011,14 @@ private func array(from list: Value, context: String = "list") throws -> [Value]
 private func identifier(_ value: Value, _ context: String) throws -> String {
   guard case .symbol(let name) = value else {
     throw SchemeError.syntax("\(context) requires an identifier")
+  }
+  return name
+}
+
+private func variableIdentifier(_ value: Value, _ context: String) throws -> String {
+  let name = try identifier(value, context)
+  guard !isSyntacticKeyword(name) else {
+    throw SchemeError.syntax("cannot bind syntactic keyword \(name)")
   }
   return name
 }
@@ -1107,11 +1393,13 @@ private final class SyntaxRules: SchemeHeapNode {
       introduced[name] = renamed
       return .symbol(renamed)
     case .pair(let pair):
-      let items = try array(from: .pair(pair), context: "syntax template")
-      if items.count == 2, isSymbol(items[0], "quote") {
+      let (items, tail) = try improperList(from: .pair(pair), context: "syntax template")
+      if tail == nil, items.count == 2, isSymbol(items[0], "quote") {
         return makeList([.symbol("quote"), try substituteQuoted(items[1], captures, path)])
       }
-      return makeList(try transcribeSequence(items, captures, path: path, serial: &serial))
+      let transcribed = try transcribeSequence(items, captures, path: path, serial: &serial)
+      let transcribedTail = try tail.map { try transcribe($0, captures, path: path, serial: &serial) }
+      return makeList(transcribed, tail: transcribedTail ?? .empty)
     case .vector(let vector):
       return .vector(
         SchemeVector(try transcribeSequence(vector.elements, captures, path: path, serial: &serial))
@@ -1220,11 +1508,34 @@ private final class SyntaxRules: SchemeHeapNode {
     default: return []
     }
   }
+
+  private func improperList(from value: Value, context: String) throws -> ([Value], Value?) {
+    var items: [Value] = []
+    var cursor = value
+    var seen = Set<ObjectIdentifier>()
+    while case .pair(let pair) = cursor {
+      guard seen.insert(ObjectIdentifier(pair)).inserted else {
+        throw SchemeError.type("\(context) must not be cyclic")
+      }
+      items.append(pair.car)
+      cursor = pair.cdr
+    }
+    if case .empty = cursor { return (items, nil) }
+    return (items, cursor)
+  }
 }
 
 private func isSymbol(_ value: Value, _ name: String) -> Bool {
   if case .symbol(let actual) = value { return actual == name }
   return false
+}
+
+private func isSyntacticKeyword(_ name: String) -> Bool {
+  [
+    "quote", "lambda", "if", "set!", "begin", "cond", "and", "or", "case", "let", "let*",
+    "letrec", "do", "delay", "quasiquote", "unquote", "unquote-splicing", "define", "else",
+    "=>", "define-syntax", "syntax-rules", "let-syntax", "letrec-syntax"
+  ].contains(name)
 }
 
 private final class Wind: SchemeHeapNode {
@@ -1261,6 +1572,7 @@ private indirect enum Continuation {
   case halt
   case ifFrame(Value, Value, SchemeEnvironment, Continuation)
   case beginFrame([Value], SchemeEnvironment, Continuation)
+  case discardFrame(Continuation)
   case setFrame(String, SchemeEnvironment, Continuation)
   case defineFrame(String, SchemeEnvironment, Continuation)
   case operatorFrame([Value], SchemeEnvironment, Continuation)
@@ -1320,6 +1632,8 @@ private func traceContinuation(_ continuation: Continuation, _ visit: (any Schem
   case .beginFrame(let values, let environment, let next):
     traceValues(values, visit)
     visit(environment)
+    traceContinuation(next, visit)
+  case .discardFrame(let next):
     traceContinuation(next, visit)
   case .setFrame(_, let environment, let next), .defineFrame(_, let environment, let next):
     visit(environment)
@@ -1468,6 +1782,65 @@ public final class Interpreter {
     }
   }
 
+  private func validateBody(_ body: [Value], context: String) throws {
+    var pending = body
+    var sawExpression = false
+    while !pending.isEmpty {
+      let form = pending.removeFirst()
+      if case .pair(let pair) = form, isSymbol(pair.car, "begin") {
+        let nested = try array(from: pair.cdr, context: "begin")
+        pending.insert(contentsOf: nested, at: 0)
+        continue
+      }
+      if case .pair(let pair) = form, case .symbol(let name) = pair.car,
+        name == "define" || name == "define-syntax"
+      {
+        if sawExpression {
+          throw SchemeError.syntax("definition after expression in \(context)")
+        }
+        if name == "define-syntax" {
+          throw SchemeError.syntax("define-syntax is only valid at top level")
+        }
+      } else {
+        sawExpression = true
+      }
+    }
+    guard sawExpression else {
+      throw SchemeError.syntax("\(context) requires an expression")
+    }
+  }
+
+  private func prepareInternalDefinitions(_ body: [Value], in environment: SchemeEnvironment) throws {
+    var pending = body
+    var names = Set<String>()
+    while !pending.isEmpty {
+      let form = pending.removeFirst()
+      if case .pair(let pair) = form, isSymbol(pair.car, "begin") {
+        pending.insert(contentsOf: try array(from: pair.cdr, context: "begin"), at: 0)
+        continue
+      }
+      guard case .pair(let pair) = form, isSymbol(pair.car, "define") else { break }
+      let definition = try array(from: .pair(pair), context: "define")
+      guard definition.count >= 3 else { throw SchemeError.syntax("define requires name and value") }
+      let name: String
+      if case .symbol = definition[1] {
+        name = try identifier(definition[1], "define")
+      } else {
+        guard case .pair(let signature) = definition[1] else {
+          throw SchemeError.syntax("invalid define")
+        }
+        name = try identifier(signature.car, "define")
+      }
+      guard !isSyntacticKeyword(name) else {
+        throw SchemeError.syntax("cannot define syntactic keyword \(name)")
+      }
+      guard names.insert(name).inserted else {
+        throw SchemeError.syntax("duplicate internal definition \(name)")
+      }
+      environment.define(name, .undefined)
+    }
+  }
+
   private func one(_ values: [Value], _ context: String) throws -> Value {
     guard values.count == 1 else {
       throw SchemeError.arity("\(context) expected one value, got \(values.count)")
@@ -1512,7 +1885,10 @@ public final class Interpreter {
             switch keyword {
             case "quote":
               try require(form, 2, "quote")
-              control = .values([form[1]])
+              let literal = form[1]
+              var seen = Set<ObjectIdentifier>()
+              markLiteral(literal, &seen)
+              control = .values([literal])
               continue
             case "if":
               guard form.count == 3 || form.count == 4 else {
@@ -1538,6 +1914,7 @@ public final class Interpreter {
               guard form.count >= 3 else {
                 throw SchemeError.syntax("lambda requires formals and body")
               }
+              try validateBody(Array(form.dropFirst(2)), context: "lambda")
               control = .values([
                 .procedure(
                   Procedure(
@@ -1550,8 +1927,12 @@ public final class Interpreter {
               guard form.count >= 3 else {
                 throw SchemeError.syntax("define requires name and value")
               }
+              try environment.requireDefinitionAllowed()
               if case .symbol(let name) = form[1] {
                 try require(form, 3, "define")
+                guard !isSyntacticKeyword(name) else {
+                  throw SchemeError.syntax("cannot define syntactic keyword \(name)")
+                }
                 continuation = .defineFrame(name, environment, continuation)
                 control = .expression(form[2], environment)
               } else {
@@ -1559,6 +1940,10 @@ public final class Interpreter {
                   throw SchemeError.syntax("invalid define")
                 }
                 let name = try identifier(signature.car, "define")
+                guard !isSyntacticKeyword(name) else {
+                  throw SchemeError.syntax("cannot define syntactic keyword \(name)")
+                }
+                try validateBody(Array(form.dropFirst(2)), context: "define")
                 let procedure = Value.procedure(
                   Procedure(
                     .closure(try parseFormals(signature.cdr), Array(form.dropFirst(2)), environment)
@@ -1572,7 +1957,11 @@ public final class Interpreter {
               continue
             case "define-syntax":
               try require(form, 3, "define-syntax")
+              try environment.requireDefinitionAllowed()
               let name = try identifier(form[1], "define-syntax")
+              guard !isSyntacticKeyword(name) else {
+                throw SchemeError.syntax("cannot define syntactic keyword \(name)")
+              }
               environment.macros[name] = try SyntaxRules(
                 keyword: name,
                 spec: form[2],
@@ -1584,12 +1973,15 @@ public final class Interpreter {
               guard form.count >= 3 else {
                 throw SchemeError.syntax("\(keyword) requires bindings and body")
               }
+              try validateBody(Array(form.dropFirst(2)), context: keyword)
               let definitions = try syntaxBindings(form[1], keyword)
-              if definitions.isEmpty {
-                continuation = .beginFrame(Array(form.dropFirst(3)), environment, continuation)
-                control = .expression(form[2], environment)
-                continue
+              try ensureDistinct(definitions, "\(keyword) binding")
+              for (name, _) in definitions {
+                guard !isSyntacticKeyword(name) else {
+                  throw SchemeError.syntax("cannot bind syntactic keyword \(name)")
+                }
               }
+              let body = Array(form.dropFirst(2))
               let local = SchemeEnvironment(parent: environment)
               let definitionEnvironment = keyword == "letrec-syntax" ? local : environment
               for (name, spec) in definitions {
@@ -1599,12 +1991,15 @@ public final class Interpreter {
                   definition: definitionEnvironment
                 )
               }
-              continuation = .beginFrame(Array(form.dropFirst(3)), local, continuation)
-              control = .expression(form[2], local)
+              try prepareInternalDefinitions(body, in: local)
+              continuation = .beginFrame(Array(body.dropFirst()), local, continuation)
+              control = .expression(body[0], local)
               continue
             case "set!":
               try require(form, 3, "set!")
-              continuation = .setFrame(try identifier(form[1], "set!"), environment, continuation)
+              continuation = .setFrame(
+                try variableIdentifier(form[1], "set!"), environment, continuation
+              )
               control = .expression(form[2], environment)
               continue
             case "let":
@@ -1619,9 +2014,12 @@ public final class Interpreter {
               }
               let entries = try bindings(form[1], "letrec")
               try ensureDistinct(entries, "letrec")
+              try validateBody(Array(form.dropFirst(2)), context: "letrec")
               let local = SchemeEnvironment(parent: environment)
               for (name, _) in entries { local.define(name, .undefined) }
               if entries.isEmpty {
+                let body = Array(form.dropFirst(2))
+                try prepareInternalDefinitions(body, in: local)
                 continuation = .beginFrame(Array(form.dropFirst(3)), local, continuation)
                 control = .expression(form[2], local)
               } else {
@@ -1671,7 +2069,11 @@ public final class Interpreter {
           }
           continuation = .operatorFrame(Array(form.dropFirst()), environment, continuation)
           control = .expression(form[0], environment)
-        default: control = .values([expression])
+        default:
+          let literal = expression
+          var seen = Set<ObjectIdentifier>()
+          markLiteral(literal, &seen)
+          control = .values([literal])
         }
 
       case .values(let values):
@@ -1690,6 +2092,9 @@ public final class Interpreter {
             continuation = .beginFrame(Array(rest.dropFirst()), environment, next)
             control = .expression(rest[0], environment)
           }
+        case .discardFrame(let next):
+          continuation = next
+          control = .values([.unspecified])
         case .setFrame(let name, let environment, let next):
           let value = try one(values, "set!")
           try environment.set(name, value)
@@ -1738,6 +2143,7 @@ public final class Interpreter {
             continuation = .letrecFrame(entries, following, environment, body, next)
             control = .expression(entries[following].1, environment)
           } else {
+            try prepareInternalDefinitions(body, in: environment)
             continuation = .beginFrame(Array(body.dropFirst()), environment, next)
             control = .expression(body[0], environment)
           }
@@ -1834,11 +2240,13 @@ public final class Interpreter {
         case .primitive(_, let function): control = .values(try function(arguments))
         case .closure(let formals, let body, let captured):
           try checkArity(arguments, formals)
+          try validateBody(body, context: "procedure body")
           let local = SchemeEnvironment(parent: captured)
           for (name, value) in zip(formals.fixed, arguments) { local.define(name, value) }
           if let rest = formals.rest {
             local.define(rest, makeList(arguments.dropFirst(formals.fixed.count)))
           }
+          try prepareInternalDefinitions(body, in: local)
           guard let first = body.first else { throw SchemeError.syntax("empty procedure body") }
           continuation = .beginFrame(Array(body.dropFirst()), local, continuation)
           control = .expression(first, local)
@@ -1925,6 +2333,7 @@ public final class Interpreter {
             if forms.isEmpty {
               control = .values([.unspecified])
             } else {
+              continuation = .discardFrame(continuation)
               continuation = .beginFrame(Array(forms.dropFirst()), global, continuation)
               control = .expression(forms[0], global)
             }
@@ -2073,7 +2482,7 @@ public final class Interpreter {
     var rest: String?
     var cursor = value
     if case .symbol(let name) = cursor {
-      rest = name
+      rest = try variableIdentifier(.symbol(name), "lambda")
       cursor = .empty
     }
     var seen = Set<ObjectIdentifier>()
@@ -2081,11 +2490,11 @@ public final class Interpreter {
       guard seen.insert(ObjectIdentifier(pair)).inserted else {
         throw SchemeError.syntax("cyclic formal list")
       }
-      fixed.append(try identifier(pair.car, "lambda"))
+      fixed.append(try variableIdentifier(pair.car, "lambda"))
       cursor = pair.cdr
     }
     if case .symbol(let name) = cursor {
-      rest = name
+      rest = try variableIdentifier(.symbol(name), "lambda")
     } else if case .empty = cursor {
     } else {
       throw SchemeError.syntax("invalid lambda formals")
@@ -2113,7 +2522,7 @@ public final class Interpreter {
       guard item.count == 2 else {
         throw SchemeError.syntax("\(context) binding requires name and initializer")
       }
-      return (try identifier(item[0], context), item[1])
+      return (try variableIdentifier(item[0], context), item[1])
     }
   }
 
@@ -2133,8 +2542,9 @@ public final class Interpreter {
 
   private func expandLet(_ form: [Value]) throws -> Value {
     guard form.count >= 3 else { throw SchemeError.syntax("let requires bindings and body") }
-    if case .symbol(let name) = form[1] {
+    if case .symbol(let rawName) = form[1] {
       guard form.count >= 4 else { throw SchemeError.syntax("named let requires body") }
+      let name = try variableIdentifier(.symbol(rawName), "named let")
       let entries = try bindings(form[2], "named let")
       try ensureDistinct(entries, "named let")
       let lambda = makeList(
@@ -2262,7 +2672,7 @@ public final class Interpreter {
     guard !test.isEmpty else { throw SchemeError.syntax("empty do test") }
     macroSerial += 1
     let loop = "do#\(macroSerial)"
-    let names = try specs.map { try identifier($0[0], "do") }
+    let names = try specs.map { try variableIdentifier($0[0], "do") }
     let steps = zip(specs, names).map { $0.0.count == 3 ? $0.0[2] : .symbol($0.1) }
     let done =
       test.count == 1 ? .unspecified : makeList([.symbol("begin")] + Array(test.dropFirst()))
@@ -2583,6 +2993,9 @@ public final class Interpreter {
     }
     primitive("rationalize", in: env) { args in
       try require(args, 2, "rationalize")
+      guard (try realComponent(args[1], "rationalize")).signum >= 0 else {
+        throw SchemeError.numeric("rationalize tolerance must be nonnegative")
+      }
       return numberValue(try rationalized(args[0], args[1]))
     }
     primitive("number?", in: env) { try predicate($0, "number?", isNumber) }
@@ -2653,12 +3066,16 @@ public final class Interpreter {
     }
     primitive("set-car!", in: env) {
       try require($0, 2, "set-car!")
-      try pair($0[0], "set-car!").car = $0[1]
+      let target = try pair($0[0], "set-car!")
+      guard !target.isLiteral else { throw SchemeError.type("cannot mutate a literal pair") }
+      target.car = $0[1]
       return .unspecified
     }
     primitive("set-cdr!", in: env) {
       try require($0, 2, "set-cdr!")
-      try pair($0[0], "set-cdr!").cdr = $0[1]
+      let target = try pair($0[0], "set-cdr!")
+      guard !target.isLiteral else { throw SchemeError.type("cannot mutate a literal pair") }
+      target.cdr = $0[1]
       return .unspecified
     }
     primitive("list", in: env) { makeList($0) }
@@ -2885,6 +3302,7 @@ public final class Interpreter {
     primitive("string-set!", in: env) { args in
       try require(args, 3, "string-set!")
       let string = try schemeString(args[0], "string-set!")
+      guard !string.isLiteral else { throw SchemeError.type("cannot mutate a literal string") }
       let i = try index(args[1], "string-set!")
       guard i < string.characters.count else { throw SchemeError.numeric("index out of range") }
       string.characters[i] = try character(args[2], "string-set!")
@@ -2918,6 +3336,7 @@ public final class Interpreter {
     primitive("string-fill!", in: env) { args in
       try require(args, 2, "string-fill!")
       let string = try schemeString(args[0], "string-fill!")
+      guard !string.isLiteral else { throw SchemeError.type("cannot mutate a literal string") }
       string.characters = Array(
         repeating: try character(args[1], "string-fill!"),
         count: string.characters.count
@@ -2966,6 +3385,7 @@ public final class Interpreter {
     primitive("vector-set!", in: env) { args in
       try require(args, 3, "vector-set!")
       let vector = try vector(args[0], "vector-set!")
+      guard !vector.isLiteral else { throw SchemeError.type("cannot mutate a literal vector") }
       let i = try index(args[1], "vector-set!")
       guard i < vector.elements.count else { throw SchemeError.numeric("index out of range") }
       vector.elements[i] = args[2]
@@ -2982,6 +3402,7 @@ public final class Interpreter {
     primitive("vector-fill!", in: env) { args in
       try require(args, 2, "vector-fill!")
       let vector = try vector(args[0], "vector-fill!")
+      guard !vector.isLiteral else { throw SchemeError.type("cannot mutate a literal vector") }
       vector.elements = Array(repeating: args[1], count: vector.elements.count)
       return .unspecified
     }
@@ -3011,7 +3432,7 @@ public final class Interpreter {
       guard try exactInteger(args[0], "scheme-report-environment") == 5 else {
         throw SchemeError.numeric("only report version 5 is supported")
       }
-      let copy = SchemeEnvironment()
+      let copy = SchemeEnvironment(definitionPolicy: .fixed)
       for (name, cell) in env.values { copy.define(name, cell.value) }
       return .environment(copy)
     }
@@ -3020,7 +3441,7 @@ public final class Interpreter {
       guard try exactInteger(args[0], "null-environment") == 5 else {
         throw SchemeError.numeric("only report version 5 is supported")
       }
-      return .environment(SchemeEnvironment())
+      return .environment(SchemeEnvironment(definitionPolicy: .fixed))
     }
     primitive("interaction-environment", in: env) { [unowned self] in
       try require($0, 0, "interaction-environment")
@@ -3130,8 +3551,6 @@ public final class Interpreter {
       _ = try outputPort(args, currentOutput, "flush-output")
       return .unspecified
     }
-    primitive("transcript-on", in: env) { _ in .unspecified }
-    primitive("transcript-off", in: env) { _ in .unspecified }
     primitive("error", in: env) { args in
       throw SchemeError.io(args.map(\.displayed).joined(separator: " "))
     }

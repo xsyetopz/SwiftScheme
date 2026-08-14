@@ -21,7 +21,7 @@ import Testing
 @Suite("SwiftScheme evaluator regressions") struct SwiftSchemeEvaluatorTests {
   @Test("R5RS evaluator, heap, continuation, and file regressions") @MainActor
   func evaluatorRegressions() throws {
-    try expect("; comment\n'(a 1 #t \"x\\n\" . z)", "(a 1 #t \"x\\n\" . z)", "reader/writer")
+    try expect("; comment\n'(a 1 #t \"x\n\" . z)", "(a 1 #t \"x\n\" . z)", "reader/writer")
     try expect(
       "(list 'Foo 'FOO #\\space #\\newline #x10 #b11 3/2)",
       "(foo foo #\\space #\\newline 16 3 3/2)",
@@ -278,9 +278,9 @@ import Testing
     try expect(
       """
       (let ((lit 'outer))
-        (define-syntax select
-          (syntax-rules (lit) ((select lit) 'literal) ((select x) 'other)))
-        (let ((lit 'shadowed)) (select lit)))
+        (let-syntax ((select
+          (syntax-rules (lit) ((select lit) 'literal) ((select x) 'other))))
+          (let ((lit 'shadowed)) (select lit))))
       """,
       "other",
       "syntax-rules literal binding identity"
