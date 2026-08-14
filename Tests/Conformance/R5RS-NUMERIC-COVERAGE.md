@@ -26,14 +26,14 @@ fixtures; they are not invented test identifiers.
 | `[~]` | Integer division: `quotient`, `remainder`, `modulo` sign laws | `numeric library`; `integer procedures accept inexact integers`; BigInt kernel division invariants | Add the complete sign/zero/arity matrix. |
 | `[~]` | Number theory: `gcd`, `lcm`, zero/sign/large operands | `numeric library`; BigInt kernel `huge gcd` assertion | Add zero and mixed exactness cases. |
 | `[~]` | Rational access: `numerator`, `denominator` exactness/error behavior | Numeric library paths plus procedure inventory | Add accessor normalization, type, and arity cases. |
-| `[ ]` | Approximation: `rationalize` examples and boundary intervals | `Tests/Fixtures/numeric-programs.scm` contains a call, but no Swift Testing test executes it | Add a native Swift Testing fixture/evaluation case before marking supported. |
+| `[~]` | Approximation: `rationalize` examples and boundary intervals | `R5RSNumericTests.rationalizeExactIntervals`, `rationalizeInexactIntervals`, and `rationalizeToleranceBoundaries` | Broaden the interval matrix, including additional exactness and boundary cases, before claiming complete coverage. |
 | `[~]` | Rounding: `floor`, `ceiling`, `truncate`, `round`, exactness | `round ties to even`; `exact numeric results` | Add negative, inexact, and complex-domain cases. |
 | `[~]` | Transcendentals: `exp`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan` | Registered and implemented numeric primitive paths; procedure inventory | Add real/complex branch, domain, and special-value cases. |
 | `[~]` | Roots/powers: exact perfect roots, integer powers, complex branches | `exact square roots and magnitudes`; `exact numeric results` | Add non-perfect roots, negative powers, and complex branch cases. |
 | `[~]` | Complex construction/accessors: `make-rectangular`, `make-polar`, `real-part`, `imag-part`, `magnitude`, `angle` | `exact square roots and magnitudes` covers magnitude only | Add constructor/accessor and polar angle coverage. |
 | `[~]` | Exactness conversion: `exact->inexact`, `inexact->exact` for real/complex values | Registered and implemented numeric primitive paths; procedure inventory | Add binary64 boundary, complex, and error cases. |
 | `[N/A]` | External upstream suites | Chibi/Larceny/Racket trees were local uncommitted audit inputs and are intentionally absent from this frozen candidate; no upstream result is claimed here | If these suites become release evidence, add them in a separately reviewed/vetted candidate with license and revision records. |
-| `[~]` | Numeric real programs: factorial, rational approximation, complex iteration | `Tests/Fixtures/numeric-programs.scm` is present as a data fixture | Add a Swift Testing fixture runner and record exact output before treating it as executable evidence. |
+| `[~]` | Numeric real programs: factorial, rational approximation, complex iteration | `R5RSNumericTests.numericProgramsFixture` executes `Tests/Fixtures/numeric-programs.scm` and asserts its complete captured output | This fixture is executable evidence for one program; add independent programs and edge-case outputs before claiming complete coverage. |
 
 ## Reader grammar page anchors
 

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftScheme
 import Testing
 
@@ -80,6 +81,74 @@ import Testing
     ]
     for literal in invalid { try r5rsExpectError(literal, literal) }
     try r5rsExpectError("(rationalize 1 -1)", "negative rationalize tolerance")
+  }
+
+  @Test("rationalize returns simplest exact rationals in bounded intervals") @MainActor
+  func rationalizeExactIntervals() throws {
+    let cases: [(expression: String, written: String)] = [
+      ("(rationalize (inexact->exact .3) 1/10)", "1/3"), ("(rationalize 3/5 1/10)", "1/2"),
+      ("(rationalize 2/7 1/5)", "1/3"), ("(rationalize -3/5 1/10)", "-1/2"),
+      ("(rationalize -2/7 1/5)", "-1/3"), ("(rationalize 0 0)", "0"), ("(rationalize 0 1/10)", "0"),
+      ("(rationalize 1/3 0)", "1/3"), ("(rationalize 1/2 1/2)", "0")
+    ]
+    for item in cases {
+      #expect(
+        try r5rsEvaluate(item.expression).written == item.written,
+        "\(item.expression): unexpected value"
+      )
+      #expect(try r5rsEvaluate("(exact? \(item.expression))").written == "#t")
+    }
+  }
+
+  @Test("rationalize preserves inexactness while staying inside its tolerance") @MainActor
+  func rationalizeInexactIntervals() throws {
+    let cases: [(expression: String, target: String, tolerance: String, written: String)] = [
+      ("(rationalize .3 1/10)", "1/3", "1/10", "0.3333333333333333"),
+      ("(rationalize 0.3 0.1)", "1/3", "0.1", "0.3333333333333333"),
+      ("(rationalize -0.3 0.1)", "-1/3", "0.1", "-0.3333333333333333"),
+      ("(rationalize 1 0.0)", "1", "0", "1.0")
+    ]
+    for item in cases {
+      let value = try r5rsEvaluate(item.expression)
+      #expect(value.written == item.written, "\(item.expression): unexpected value")
+      #expect(try r5rsEvaluate("(inexact? \(item.expression))").written == "#t")
+      #expect(
+        try r5rsEvaluate("(<= (abs (- \(item.expression) \(item.target))) \(item.tolerance))")
+          .written == "#t",
+        "\(item.expression): result must stay within tolerance"
+      )
+    }
+  }
+
+  @Test("rationalize accepts zero tolerance and rejects negative or non-real tolerance") @MainActor
+  func rationalizeToleranceBoundaries() throws {
+    let zeroTolerance: [(expression: String, written: String)] = [
+      ("(rationalize 1 0)", "1"), ("(rationalize -1 0)", "-1"), ("(rationalize 1 0.0)", "1.0")
+    ]
+    for item in zeroTolerance { #expect(try r5rsEvaluate(item.expression).written == item.written) }
+
+    let invalid = [
+      ("(rationalize 1 -1)", "negative exact tolerance"),
+      ("(rationalize 1 -1/10)", "negative rational tolerance"),
+      ("(rationalize 1 -0.1)", "negative inexact tolerance"),
+      ("(rationalize 1+2i 1/10)", "complex value"), ("(rationalize 1 1+2i)", "complex tolerance"),
+      ("(rationalize 1)", "missing tolerance"), ("(rationalize 1 1 1)", "extra tolerance")
+    ]
+    for (expression, label) in invalid { try r5rsExpectError(expression, label) }
+  }
+
+  @Test("numeric-programs fixture captures its complete output") @MainActor
+  func numericProgramsFixture() throws {
+    let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+      .deletingLastPathComponent().appendingPathComponent("Fixtures/numeric-programs.scm")
+    let source = try String(contentsOf: fixtureURL, encoding: .utf8)
+    var captured = ""
+    let interpreter = Interpreter(output: { captured += $0 })
+    _ = try interpreter.evaluate(source)
+
+    let expected =
+      "(93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000 41/42 12345678901234567899-1493827147049382714249/77i #t #t #t 500000000000000000000 0.3333333333333333)\n"
+    #expect(captured == expected)
   }
 
   @Test("reserved lexical characters are not identifiers") @MainActor func reservedCharacters()
