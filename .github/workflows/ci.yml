@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Toolchain
+        run: swift --version
+      - name: Build
+        run: swift build
+      - name: Swift tests
+        run: swift test
+      - name: Repository fixtures
+        run: python3 Scripts/run-fixtures.py
+      - name: Chibi R5RS corpus
+        run: python3 Scripts/run-chibi-r5rs.py
