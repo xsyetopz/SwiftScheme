@@ -111,7 +111,6 @@ trailing_comma:
 
 # Google requires cases to NOT be indented relative to their switch statements
 switch_case_alignment:
-  indented_cases: false
 
 force_try:
   severity: error
@@ -129,7 +128,6 @@ unused_import:
 
 trailing_whitespace:
   severity: error
-  ignores_empty_lines: false
 
 # Google permits multiple blank lines but doesn't encourage them.
 # Capped to 2 to prevent messy files, but kept as a warning to avoid being overly cosmetic.
@@ -142,7 +140,6 @@ comma:
 
 colon:
   severity: error
-  apply_to_dictionaries: false
 
 statement_position:
   statement_mode: default

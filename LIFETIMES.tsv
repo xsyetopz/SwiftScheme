@@ -2,15 +2,15 @@ type/area	field/reference	lifetime/ownership	reason	risk
 Interpreter	globalEnvironment	strong for interpreter lifetime	Top-level bindings persist across forms	medium
 Interpreter	heap registry	weak registrations plus explicit roots	Tracing safe-point collection breaks outgoing references of unreachable Scheme cycles	high: incomplete root/edge enumeration can free reachable state or leak cycles
 Value	pair/string/closure reference	strong	Scheme values may outlive local Swift scopes	high
-PairCell	car,cdr	strong and mutable	Pairs preserve identity, sharing, improper lists, and cycles	high: ARC cannot collect pair cycles
-StringCell	characters	owned mutable buffer	Swift String value semantics cannot model Scheme string identity/mutation	medium
+Pair	car,cdr	strong and mutable	Pairs preserve identity, sharing, improper lists, and cycles	high: ARC cannot collect pair cycles
+SchemeString	characters	owned mutable buffer	Swift String value semantics cannot model Scheme string identity/mutation	medium
 Environment	parent	strong	Escaped closures require all lexical ancestors; weak references would dangle	high
-Environment	bindings	strong BindingCell values	Variables denote persistent locations rather than copied values	high
-BindingCell	value	strong mutable; may begin undefined	Required by set! and mutually recursive letrec/internal definitions	high: environment-closure cycles
+Environment	bindings	strong Cell values	Variables denote persistent locations rather than copied values	high
+Cell	value	strong mutable; may begin undefined	Required by set! and mutually recursive letrec/internal definitions	high: environment-closure cycles
 Closure	environment	strong	Lexical scope must survive the creator's return	high: closure may cycle through its defining binding
 Closure	body/formals	owned immutable parsed data	Callable code must survive source-buffer/evaluator frames	medium
 Primitive	Swift function value	static or interpreter-owned; avoid accidental captures of the interpreter	Built-ins need no Scheme lexical environment	low
-SymbolPool	interned names	interpreter-owned strong table or canonical value strings	eq?/eqv? identity must be stable for equal symbol names	medium: unbounded unique symbols
+Value.symbol	String payload	owned by each Value	eq?/eqv? compare symbol spellings	low
 Reader	source/cursor	borrowed only during one read; diagnostics copy offsets/line/column	String.Index is valid only for its originating String	medium
 Writer	visited pair identities	strong/local set for one print only	Detect cycles without retaining graph after output	low
 CLI	Interpreter	strong for process/session lifetime	File forms and REPL forms share top-level state	low

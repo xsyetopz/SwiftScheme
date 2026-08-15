@@ -27,8 +27,8 @@ assertion.
 ## Footprint matrix
 
 | Check | R5RS surface | Current status | Footprint in this workspace | Evidence / remaining work |
-|---|---|---|---|---|
-| `[~]` | Lexical conventions, datum reader, and external representations (2.1-2.3, pp. 5-8; 7.1.2, p. 39) | Partial | `Reader` and `Writer` in `Sources/swiftscheme/SwiftScheme.swift`; comments, case-folded ASCII identifiers, booleans, strings, characters, lists, dotted lists, vectors, quote/quasiquote abbreviations, reserved-character diagnostics, and radix/exactness number forms are present. | `R5RSNumericTests` covers strict string escapes, raw controls, reserved characters, malformed identifiers, and numeric grammar placements; `SwiftSchemeRegressionTests` covers reader/writer forms. A complete malformed-token/grammar matrix and all external-representation round trips remain open. |
+| --- | --- | --- | --- | --- |
+| `[~]` | Lexical conventions, datum reader, and external representations (2.1-2.3, pp. 5-8; 7.1.2, p. 39) | Partial | `Reader` and `Writer` in `Sources/SwiftScheme/Frontend/ExternalForms.swift`, `Reader+Numbers.swift`, and `Sources/SwiftScheme/Evaluator/Interpreter.swift`; comments, case-folded ASCII identifiers, booleans, strings, characters, lists, dotted lists, vectors, quote/quasiquote abbreviations, reserved-character diagnostics, and radix/exactness number forms are present. | `R5RSNumericTests` covers strict string escapes, raw controls, reserved characters, malformed identifiers, and numeric grammar placements; `SwiftSchemeRegressionTests` covers reader/writer forms. A complete malformed-token/grammar matrix and all external-representation round trips remain open. |
 | `[x]` | Core expressions: variable reference, literal, call, `quote`, `lambda`, `if`, `set!`, `begin` (4.1, pp. 8-10) | Supported | `Interpreter.run`, `SchemeEnvironment`, `Procedure`, `parseFormals`. | Current labels cover `reader/writer`, `closure mutation`, `variadic lambda`, `if`, `unbound set`, and `duplicate formals`; sequencing also appears in the multi-form evaluator cases. |
 | `[~]` | Derived expressions: `cond`, `case`, `and`, `or`, `let`, `let*`, `letrec`, named `let`, `do`, `delay`, `quasiquote` (4.2, pp. 10-13) | Partial | `expandCond`, `expandCase`, `expandAnd`, `expandOr`, `expandLet`, `expandLetStar`, `expandDo`, `expandQuasiquote`; `Promise` and `force`. | `R5RSDerivedControlTests` now proves generated syntax and quasiquote helpers resist lexical shadowing, rejects malformed `cond`/`begin`/`case`/`do`, and checks empty-list `map`/`for-each` domains. Explicit side-effect laziness, named-let boundaries, and unspecified-result cases remain open. |
 | `[~]` | Programs, top-level definitions, internal definitions (5.1-5.2, pp. 16-17) | Partial | Top-level `evaluate` loop and `define`/procedure shorthand in `Interpreter.run`; body validation/prebinding enforces an initial internal-definition group and rejects duplicate/late definitions. | `R5RSMacroDefinitionTests` proves legal grouped definitions, shared binding regions, begin splicing, duplicate rejection, and definition-after-expression diagnostics. Full top-level ordering and all malformed-definition forms remain open. |
@@ -63,7 +63,7 @@ error, exactness, or unspecified-result rule; each family therefore remains link
 to focused Swift Testing coverage before it can be called complete.
 
 | R5RS family | Registered/implemented names observed | Checklist |
-|---|---|---|
+| --- | --- | --- |
 | Equivalence | `eqv?`, `eq?`, `equal?` | `[~]` Add direct corner-case and identity matrix. |
 | Numeric predicates/comparison | `number?`, `complex?`, `real?`, `rational?`, `integer?`, `exact?`, `inexact?`, `=`, `<`, `>`, `<=`, `>=`, `zero?`, `positive?`, `negative?`, `odd?`, `even?` | `[~]` Numeric reader and mixed exact/inexact cases are covered; expand domains/errors. |
 | Numeric arithmetic | `max`, `min`, `+`, `*`, `-`, `/`, `quotient`, `remainder`, `modulo`, `gcd`, `lcm`, `numerator`, `denominator`, `floor`, `ceiling`, `truncate`, `round`, `rationalize` | `[~]` Exactness and sign laws need per-entry tests. |
@@ -103,10 +103,6 @@ to focused Swift Testing coverage before it can be called complete.
 
 ## Evidence ledger and next slices
 
-- Triage report and extracted PDF evidence were campaign-temp inputs at
-  `/tmp/skizzles-orchestration/swiftscheme-r5rs-20260814/triage/triage__r5rs_footprint/`;
-  they are not part of the candidate and are not required to interpret this
-  self-contained checklist.
 - Architecture decision and long-term topology/enforcement plan:
   [`Architecture/ADR-0001-r5rs-runtime-topology.md`](../../Architecture/ADR-0001-r5rs-runtime-topology.md).
 - Apple HIG applicability boundary:
