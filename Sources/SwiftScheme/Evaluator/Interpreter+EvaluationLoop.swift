@@ -184,9 +184,7 @@ extension Interpreter {
               // Empty syntax-binding groups still establish a body scope; Chibi's
               // corpus relies on ordinary internal definitions there. Non-empty
               // transformer groups retain expression-only body validation.
-              if !definitions.isEmpty {
-                try validateBody(body, context: keyword, in: local)
-              }
+              if !definitions.isEmpty { try validateBody(body, context: keyword, in: local) }
               try prepareInternalDefinitions(body, in: local)
               continuation = .beginFrame(Array(body.dropFirst()), local, true, continuation)
               control = .expression(body[0], local)

@@ -200,7 +200,10 @@ extension Interpreter {
     case .callWithInputString:
       try require(arguments, 2, "call-with-input-string")
       try requireProcedure(arguments[1], "call-with-input-string")
-      let port = SchemePort(input: try schemeString(arguments[0], "call-with-input-string").string, defaultReady: true)
+      let port = SchemePort(
+        input: try schemeString(arguments[0], "call-with-input-string").string,
+        defaultReady: true
+      )
       control = .apply(arguments[1], [.port(port)])
     case .callWithOutputString:
       try require(arguments, 1, "call-with-output-string")

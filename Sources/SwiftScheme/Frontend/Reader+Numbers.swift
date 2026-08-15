@@ -137,7 +137,8 @@ extension Reader {
     // `#`.  Here it is an inexactness marker, not an unspecified digit:
     // preserving the exact ratio is required for binary64 round-trips.
     let generatedCandidate = text.hasSuffix("#") ? String(text.dropLast()) : text
-    let generatedInexact = text.hasSuffix("#") && generatedCandidate.contains("/")
+    let generatedInexact =
+      text.hasSuffix("#") && generatedCandidate.contains("/")
       && !generatedCandidate.split(separator: "/").contains { $0.contains("#") }
     let numericText = generatedInexact ? generatedCandidate : text
     let slashParts = numericText.split(separator: "/", omittingEmptySubsequences: false)
@@ -150,7 +151,9 @@ extension Reader {
       guard exactness != .exact || (!numerator.hasPlaceholder && !denominator.hasPlaceholder) else {
         return nil
       }
-      let inexact = generatedInexact || exactness == .inexact || numerator.hasPlaceholder || denominator.hasPlaceholder
+      let inexact =
+        generatedInexact || exactness == .inexact || numerator.hasPlaceholder
+        || denominator.hasPlaceholder
       return inexact ? .inexact(rational.doubleValue) : .exact(rational)
     }
 

@@ -56,8 +56,8 @@ import Testing
 
   @Test("char-ready? tracks string port exhaustion") func charReadyTracksExhaustion() throws {
     let value = try Interpreter { _ in }.evaluate(
-      "(let ((p (open-input-string \"a\"))) " +
-      "(list (char-ready? p) (read-char p) (char-ready? p) (eof-object? (read-char p))))"
+      "(let ((p (open-input-string \"a\"))) "
+        + "(list (char-ready? p) (read-char p) (char-ready? p) (eof-object? (read-char p))))"
     )
     #expect(value.written == "(#t #\\a #f #t)")
   }

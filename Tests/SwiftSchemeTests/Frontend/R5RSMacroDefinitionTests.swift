@@ -51,7 +51,7 @@ private func expectR5RSyntaxError(_ source: String, _ label: String) {
           (s a b c)))
       """
     )
-     #expect(result.written == "ok")
+    #expect(result.written == "ok")
   }
 
   @Test("syntax-rules template ellipsis remains reserved despite a value binding")
@@ -61,7 +61,9 @@ private func expectR5RSyntaxError(_ source: String, _ label: String) {
       (let ((... 2))
         (let-syntax ((s (syntax-rules () ((_ x ...) (list x ...)))))
           (s 1 2 3)))
-      """, "template ellipsis shadowing")
+      """,
+      "template ellipsis shadowing"
+    )
   }
 
   @Test("syntax-rules treats a non-head underscore as a pattern variable")
@@ -195,7 +197,12 @@ private func expectR5RSyntaxError(_ source: String, _ label: String) {
   @Test("let-syntax bodies admit internal definitions") func syntaxBodiesAreDefinitions() throws {
     let result = try Interpreter { _ in }.evaluate("(let-syntax () (define value 1) value)")
     #expect(result.written == "1")
-    do { _ = try Interpreter { _ in }.evaluate("(letrec-syntax () (define-syntax nested (syntax-rules ())) nested)"); #expect(Bool(false)) } catch { #expect(String(describing: error).contains("unbound variable")) }
+    do {
+      _ = try Interpreter { _ in }.evaluate(
+        "(letrec-syntax () (define-syntax nested (syntax-rules ())) nested)"
+      )
+      #expect(Bool(false))
+    } catch { #expect(String(describing: error).contains("unbound variable")) }
   }
 
   @Test("syntax-rules expands vector repetitions") func vectorRepetition() throws {

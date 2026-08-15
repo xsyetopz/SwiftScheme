@@ -123,7 +123,8 @@ extension SyntaxRules {
       if patternIndex == patterns.count { return inputIndex == inputs.count ? candidate : nil }
       let repeated =
         patternIndex + 1 < patterns.count && isSymbol(patterns[patternIndex + 1], ellipsis)
-          && (ellipsis != "..." || (definition?.cell("...") == nil && definition?.macro("...") == nil))
+        && (ellipsis != "..."
+          || (definition?.cell("...") == nil && definition?.macro("...") == nil))
       if repeated {
         let required = patterns.count - patternIndex - 2
         guard inputs.count - inputIndex >= required else { return nil }

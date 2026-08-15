@@ -478,7 +478,10 @@ import Testing
 
     for escape in ["n", "r", "t"] {
       let value = try r5rsEvaluate("\"bad\\\(escape)escape\"")
-      #expect(value.written == "\"bad" + String([escape == "n" ? "\n" : escape == "r" ? "\r" : "\t"]) + "escape\"")
+      #expect(
+        value.written == "\"bad" + String([escape == "n" ? "\n" : escape == "r" ? "\r" : "\t"])
+          + "escape\""
+      )
     }
     try r5rsExpectError("\"bad\\aescape\"", "\\a escape")
   }

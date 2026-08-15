@@ -236,7 +236,10 @@ extension Interpreter {
       return .character(scalarCaseMap(try character($0[0], "char-downcase"), upper: false))
     }
 
-    for name in ["char=?", "char<?", "char>?", "char<=?", "char>=?", "char-ci=?", "char-ci<?", "char-ci>?", "char-ci<=?", "char-ci>=?"] {
+    for name in [
+      "char=?", "char<?", "char>?", "char<=?", "char>=?", "char-ci=?", "char-ci<?", "char-ci>?",
+      "char-ci<=?", "char-ci>=?",
+    ] {
       primitive(name, in: env) { args in
         guard args.count == 2 else { throw SchemeError.arity("\(name) expects 2 arguments") }
         let chars = try args.map { try character($0, name) }
@@ -244,7 +247,13 @@ extension Interpreter {
           let values = chars.map { scalarCaseKey($0) }
           for pair in zip(values, values.dropFirst()) {
             let ordering = scalarStringOrdering(pair.0, pair.1)
-            let ok = name.hasSuffix("=?") ? ordering == 0 : name.hasSuffix("<?") ? ordering < 0 : name.hasSuffix(">?") ? ordering > 0 : name.hasSuffix("<=?") ? ordering <= 0 : ordering >= 0
+            let ok =
+              name.hasSuffix("=?")
+              ? ordering == 0
+              : name.hasSuffix("<?")
+                ? ordering < 0
+                : name.hasSuffix(">?")
+                  ? ordering > 0 : name.hasSuffix("<=?") ? ordering <= 0 : ordering >= 0
             if !ok { return .boolean(false) }
           }
           return .boolean(true)
@@ -264,13 +273,17 @@ extension Interpreter {
         return .boolean(true)
       }
     }
-    for name in ["string=?", "string<?", "string>?", "string<=?", "string>=?", "string-ci=?", "string-ci<?", "string-ci>?", "string-ci<=?", "string-ci>=?"] {
+    for name in [
+      "string=?", "string<?", "string>?", "string<=?", "string>=?", "string-ci=?", "string-ci<?",
+      "string-ci>?", "string-ci<=?", "string-ci>=?",
+    ] {
       primitive(name, in: env) { args in
         guard args.count == 2 else { throw SchemeError.arity("\(name) expects 2 arguments") }
         let strings = try args.map { try schemeString($0, name).string }
         if name.hasPrefix("string-ci") {
           let values = strings.map { Array($0).map(scalarCaseKey) }
-          for pair in zip(values, values.dropFirst()) where !compareCharacterKeys(pair.0, pair.1, name) { return .boolean(false) }
+          for pair in zip(values, values.dropFirst())
+          where !compareCharacterKeys(pair.0, pair.1, name) { return .boolean(false) }
           return .boolean(true)
         }
         let values = strings

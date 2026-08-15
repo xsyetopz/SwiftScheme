@@ -98,9 +98,9 @@ package final class SyntaxRules: SchemeMacro {
       literalIndex = 1
     }
     let literalValues: [Value]
-    do { literalValues = try array(from: form[literalIndex], context: "syntax-rules literals") } catch {
-      throw SchemeError.syntax("syntax-rules literals must be a proper list")
-    }
+    do {
+      literalValues = try array(from: form[literalIndex], context: "syntax-rules literals")
+    } catch { throw SchemeError.syntax("syntax-rules literals must be a proper list") }
     let literalNames = try literalValues.map { try identifier($0, "syntax-rules literal") }
     guard !literalNames.contains("...") else {
       throw SchemeError.syntax("ellipsis cannot be a syntax-rules literal")
