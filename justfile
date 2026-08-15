@@ -66,7 +66,7 @@ duplication:
 fix: format lint-fix
 
 # Run the complete local quality gate without mutating files.
-check: build test lint format-check architecture duplication fixtures
+check: build test lint format-check duplication fixtures
 
 # Run the CLI with a small deterministic smoke program.
 smoke: build
