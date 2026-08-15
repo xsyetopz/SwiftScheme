@@ -36,34 +36,27 @@ package enum WindAction {
 
 package indirect enum Continuation {
   case halt
-  case ifFrame(Value, Value, SchemeEnvironment, Continuation)
-  case beginFrame([Value], SchemeEnvironment, Bool, Continuation)
-  case expressionContext(Continuation)
-  case discardFrame(Continuation)
-  case setFrame(String, SchemeEnvironment, Continuation)
-  case defineFrame(String, SchemeEnvironment, Continuation)
-  case operatorFrame([Value], SchemeEnvironment, Continuation)
-  case operandFrame(Value, [Value], [Value], SchemeEnvironment, Continuation)
-  case letrecFrame(
-    [(String, Value)],
-    Int,
-    SchemeEnvironment,
-    [Value],
-    SchemeEnvironment,
-    Continuation
-  )
-  case callValuesFrame(Value, Continuation)
-  case promiseFrame(Promise, Continuation)
-  case windBeforeFrame(Value, Value, Wind, Continuation)
-  case windBodyFrame(Wind, Value, Continuation)
-  case windAfterFrame([Value], Continuation)
+  case ifFrame(Value, Value, SchemeEnvironment, Self)
+  case beginFrame([Value], SchemeEnvironment, Bool, Self)
+  case expressionContext(Self)
+  case discardFrame(Self)
+  case setFrame(String, SchemeEnvironment, Self)
+  case defineFrame(String, SchemeEnvironment, Self)
+  case operatorFrame([Value], SchemeEnvironment, Self)
+  case operandFrame(Value, [Value], [Value], SchemeEnvironment, Self)
+  case letrecFrame([(String, Value)], Int, SchemeEnvironment, [Value], SchemeEnvironment, Self)
+  case callValuesFrame(Value, Self)
+  case promiseFrame(Promise, Self)
+  case windBeforeFrame(Value, Value, Wind, Self)
+  case windBodyFrame(Wind, Value, Self)
+  case windAfterFrame([Value], Self)
   case transitionFrame([WindAction], Captured, [Value])
   case enteredFrame(Wind, [WindAction], Captured, [Value])
-  case mapFrame(Value, [[Value]], Int, [Value], Bool, Continuation)
-  case closePortFrame(SchemePort, Continuation)
-  case restoreInputFrame(SchemePort, SchemePort, Continuation)
-  case restoreOutputFrame(SchemePort, SchemePort, Continuation)
-  case outputStringFrame(SchemePort, Continuation)
+  case mapFrame(Value, [[Value]], Int, [Value], Bool, Self)
+  case closePortFrame(SchemePort, Self)
+  case restoreInputFrame(SchemePort, SchemePort, Self)
+  case restoreOutputFrame(SchemePort, SchemePort, Self)
+  case outputStringFrame(SchemePort, Self)
 }
 
 package enum Control {

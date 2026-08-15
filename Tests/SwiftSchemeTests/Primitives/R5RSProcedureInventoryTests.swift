@@ -32,9 +32,9 @@ import Testing
       "call-with-input-file", "call-with-output-file", "open-input-file", "open-output-file",
       "close-input-port", "close-output-port", "current-input-port", "current-output-port", "read",
       "read-char", "peek-char", "eof-object?", "char-ready?", "write", "display", "newline",
-      "write-char"
+      "write-char",
     ]
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     for name in Set(names) {
       #expect(
         try interpreter.evaluate("(procedure? \(name))").written == "#t",
@@ -46,7 +46,7 @@ import Testing
   @Test("supported optional procedure names are bound separately")
   func supportedOptionalProcedureBindings() throws {
     let names = ["interaction-environment", "with-input-from-file", "with-output-to-file", "load"]
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     for name in names {
       #expect(
         try interpreter.evaluate("(procedure? \(name))").written == "#t",

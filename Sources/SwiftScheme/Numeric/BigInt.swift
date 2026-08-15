@@ -11,8 +11,8 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
   private var sign: Int8
   private var words: [UInt32]
 
-  public static let zero = BigInt()
-  public static let one = BigInt(1)
+  public static let zero = Self()
+  public static let one = Self(1)
 
   public init() {
     sign = 0
@@ -72,7 +72,7 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
 
   public var isZero: Bool { sign == 0 }
   public var signum: Int { Int(sign) }
-  public var absoluteValue: BigInt { BigInt(sign: 1, words: words) }
+  public var absoluteValue: Self { Self(sign: 1, words: words) }
   public var description: String { string(radix: 10) }
 
   public func string(radix: Int = 10) -> String {
@@ -88,7 +88,7 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
       digits.append(alphabet[Int(division.remainder)])
     }
     if sign < 0 { digits.append(45) }
-    return String(decoding: digits.reversed(), as: UTF8.self)
+    return String(bytes: digits.reversed(), encoding: .utf8) ?? ""
   }
 
   public var exactInt64: Int64? {
@@ -164,13 +164,11 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     return UInt64(first) | (words.count == 2 ? UInt64(words[1]) << 32 : 0)
   }
 
-  public static prefix func - (value: BigInt) -> BigInt {
-    BigInt(sign: -value.sign, words: value.words)
-  }
+  public static prefix func - (value: Self) -> Self { Self(sign: -value.sign, words: value.words) }
 
-  public static prefix func + (value: BigInt) -> BigInt { value }
+  public static prefix func + (value: Self) -> Self { value }
 
-  public static func < (lhs: BigInt, rhs: BigInt) -> Bool {
+  public static func < (lhs: Self, rhs: Self) -> Bool {
     if lhs.sign != rhs.sign { return lhs.sign < rhs.sign }
     switch lhs.sign {
     case -1: return compareMagnitude(lhs.words, rhs.words) > 0
@@ -179,23 +177,23 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     }
   }
 
-  public static func + (lhs: BigInt, rhs: BigInt) -> BigInt {
+  public static func + (lhs: Self, rhs: Self) -> Self {
     if lhs.sign == 0 { return rhs }
     if rhs.sign == 0 { return lhs }
     if lhs.sign == rhs.sign {
-      return BigInt(sign: lhs.sign, words: addMagnitudes(lhs.words, rhs.words))
+      return Self(sign: lhs.sign, words: addMagnitudes(lhs.words, rhs.words))
     }
     let comparison = compareMagnitude(lhs.words, rhs.words)
     if comparison == 0 { return .zero }
     if comparison > 0 {
-      return BigInt(sign: lhs.sign, words: subtractMagnitudes(lhs.words, rhs.words))
+      return Self(sign: lhs.sign, words: subtractMagnitudes(lhs.words, rhs.words))
     }
-    return BigInt(sign: rhs.sign, words: subtractMagnitudes(rhs.words, lhs.words))
+    return Self(sign: rhs.sign, words: subtractMagnitudes(rhs.words, lhs.words))
   }
 
-  public static func - (lhs: BigInt, rhs: BigInt) -> BigInt { lhs + -rhs }
+  public static func - (lhs: Self, rhs: Self) -> Self { lhs + -rhs }
 
-  public static func * (lhs: BigInt, rhs: BigInt) -> BigInt {
+  public static func * (lhs: Self, rhs: Self) -> Self {
     guard !lhs.isZero, !rhs.isZero else { return .zero }
     var result = Array(repeating: UInt32(0), count: lhs.words.count + rhs.words.count)
     for i in lhs.words.indices {
@@ -214,30 +212,32 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
         index += 1
       }
     }
-    return BigInt(sign: lhs.sign * rhs.sign, words: result)
+    return Self(sign: lhs.sign * rhs.sign, words: result)
   }
 
-  public func quotientAndRemainder(dividingBy divisor: BigInt) throws -> (
-    quotient: BigInt, remainder: BigInt
+  public static func *= (lhs: inout Self, rhs: Self) { lhs = lhs * rhs }
+
+  public func quotientAndRemainder(dividingBy divisor: Self) throws -> (
+    quotient: Self, remainder: Self
   ) {
     guard !divisor.isZero else { throw BigIntError.divisionByZero }
     guard !isZero else { return (.zero, .zero) }
     let division = Self.divideMagnitudes(words, by: divisor.words)
     return (
-      BigInt(sign: sign * divisor.sign, words: division.quotient),
-      BigInt(sign: sign, words: division.remainder)
+      Self(sign: sign * divisor.sign, words: division.quotient),
+      Self(sign: sign, words: division.remainder)
     )
   }
 
-  public func quotient(dividingBy divisor: BigInt) throws -> BigInt {
+  public func quotient(dividingBy divisor: Self) throws -> Self {
     try quotientAndRemainder(dividingBy: divisor).quotient
   }
 
-  public func remainder(dividingBy divisor: BigInt) throws -> BigInt {
+  public func remainder(dividingBy divisor: Self) throws -> Self {
     try quotientAndRemainder(dividingBy: divisor).remainder
   }
 
-  public func modulo(_ divisor: BigInt) throws -> BigInt {
+  public func modulo(_ divisor: Self) throws -> Self {
     let remainder = try remainder(dividingBy: divisor)
     return !remainder.isZero && remainder.sign != divisor.sign ? remainder + divisor : remainder
   }
@@ -247,37 +247,41 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     return Self.divideMagnitude(words, by: divisor).remainder
   }
 
-  public static func gcd(_ lhs: BigInt, _ rhs: BigInt) -> BigInt {
+  public static func gcd(_ lhs: Self, _ rhs: Self) -> Self {
     var a = lhs.absoluteValue
     var b = rhs.absoluteValue
     while !b.isZero {
-      let remainder = try! a.remainder(dividingBy: b)
+      guard let remainder = try? a.remainder(dividingBy: b) else {
+        preconditionFailure("BigInt invariant violated")
+      }
       a = b
       b = remainder
     }
     return a
   }
 
-  public func power(_ exponent: Int) throws -> BigInt {
+  public func power(_ exponent: Int) throws -> Self {
     guard exponent >= 0 else { throw BigIntError.negativeExponent }
     var exponent = exponent
     var factor = self
-    var result = BigInt.one
+    var result = Self.one
     while exponent != 0 {
-      if exponent & 1 == 1 { result = result * factor }
+      if exponent & 1 == 1 { result *= factor }
       exponent >>= 1
-      if exponent != 0 { factor = factor * factor }
+      if exponent != 0 { factor *= factor }
     }
     return result
   }
 
-  public func integerSquareRoot() -> BigInt? {
+  public func integerSquareRoot() -> Self? {
     guard sign >= 0 else { return nil }
     guard self > .one else { return self }
-    var low = BigInt.one
+    var low = Self.one
     var high = self
     while low <= high {
-      let middle = try! (low + high).quotient(dividingBy: BigInt(2))
+      guard let middle = try? (low + high).quotient(dividingBy: Self(2)) else {
+        preconditionFailure("BigInt invariant violated")
+      }
       let square = middle * middle
       if square == self { return middle }
       if square < self { low = middle + .one } else { high = middle - .one }
@@ -285,7 +289,7 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     return high
   }
 
-  public var exactSquareRoot: BigInt? {
+  public var exactSquareRoot: Self? {
     guard let root = integerSquareRoot(), root * root == self else { return nil }
     return root
   }
@@ -379,7 +383,8 @@ public struct BigInt: Hashable, Sendable, Comparable, CustomStringConvertible,
     }
 
     let base = UInt64(1) << 32
-    let shift = divisor.last!.leadingZeroBitCount
+    guard let mostSignificant = divisor.last else { return ([], dividend) }
+    let shift = mostSignificant.leadingZeroBitCount
     let normalizedDivisor = shiftLeft(divisor, by: shift)
     var normalizedDividend = shiftLeft(dividend, by: shift)
     if normalizedDividend.count == dividend.count { normalizedDividend.append(0) }

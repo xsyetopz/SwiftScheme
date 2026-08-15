@@ -1,8 +1,8 @@
 import Foundation
-import SwiftSchemeRuntime
 import SwiftSchemeFrontend
-import SwiftSchemePrimitives
 import SwiftSchemeNumeric
+import SwiftSchemePrimitives
+import SwiftSchemeRuntime
 
 extension Interpreter {
   func installDataPrimitives(in env: SchemeEnvironment) {
@@ -203,7 +203,7 @@ extension Interpreter {
     }
     for name in [
       "char=?", "char<?", "char>?", "char<=?", "char>=?", "char-ci=?", "char-ci<?", "char-ci>?",
-      "char-ci<=?", "char-ci>=?"
+      "char-ci<=?", "char-ci>=?",
     ] {
       primitive(name, in: env) { args in
         guard args.count >= 2 else {
@@ -218,15 +218,15 @@ extension Interpreter {
     primitive("char-alphabetic?", in: env) {
       try charPredicate($0, "char-alphabetic?", isScalarCaseCharacter)
     }
-    primitive("char-numeric?", in: env) { try charPredicate($0, "char-numeric?", { $0.isNumber }) }
+    primitive("char-numeric?", in: env) { try charPredicate($0, "char-numeric?") { $0.isNumber } }
     primitive("char-whitespace?", in: env) {
-      try charPredicate($0, "char-whitespace?", { $0.isWhitespace })
+      try charPredicate($0, "char-whitespace?") { $0.isWhitespace }
     }
     primitive("char-upper-case?", in: env) {
-      try charPredicate($0, "char-upper-case?", { isScalarCaseCharacter($0) && $0.isUppercase })
+      try charPredicate($0, "char-upper-case?") { isScalarCaseCharacter($0) && $0.isUppercase }
     }
     primitive("char-lower-case?", in: env) {
-      try charPredicate($0, "char-lower-case?", { isScalarCaseCharacter($0) && $0.isLowercase })
+      try charPredicate($0, "char-lower-case?") { isScalarCaseCharacter($0) && $0.isLowercase }
     }
     primitive("char-upcase", in: env) {
       try require($0, 1, "char-upcase")
@@ -312,7 +312,7 @@ extension Interpreter {
     }
     for name in [
       "string=?", "string<?", "string>?", "string<=?", "string>=?", "string-ci=?", "string-ci<?",
-      "string-ci>?", "string-ci<=?", "string-ci>=?"
+      "string-ci>?", "string-ci<=?", "string-ci>=?",
     ] {
       primitive(name, in: env) { args in
         guard args.count >= 2 else {

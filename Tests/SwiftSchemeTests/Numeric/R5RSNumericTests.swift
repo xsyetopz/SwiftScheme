@@ -3,7 +3,7 @@ import SwiftScheme
 import Testing
 
 @MainActor private func r5rsEvaluate(_ source: String) throws -> Value {
-  try Interpreter(output: { _ in }).evaluate(source)
+  try Interpreter { _ in }.evaluate(source)
 }
 
 @MainActor private func r5rsExpectError(_ source: String, _ label: String) throws {
@@ -14,17 +14,14 @@ import Testing
 }
 
 @Suite("R5RS §7.1.1 numeric and external-form grammar") struct R5RSNumericTests {
-  @Test("abs accepts real numbers and rejects complex numbers") @MainActor
-  func absDomain() throws {
+  @Test("abs accepts real numbers and rejects complex numbers") @MainActor func absDomain() throws {
     #expect(try r5rsEvaluate("(abs -3)").written == "3")
     #expect(try r5rsEvaluate("(abs -3.5)").written == "3.5")
     try r5rsExpectError("(abs 1+2i)", "abs complex domain")
     do {
       _ = try r5rsEvaluate("(/ 1 #t)")
       #expect(Bool(false), "division type error: expected SchemeError")
-    } catch let error as SchemeError {
-      #expect(error.description.contains("expected number"))
-    }
+    } catch let error as SchemeError { #expect(error.description.contains("expected number")) }
   }
 
   @Test("numeric external representations preserve complex signs and specials") @MainActor
@@ -34,8 +31,7 @@ import Testing
     #expect(try r5rsEvaluate("(string->number (number->string +inf.0))").written == "+inf.0")
     #expect(try r5rsEvaluate("(string->number (number->string +nan.0))").written == "+nan.0")
     #expect(
-      try r5rsEvaluate("(number->string (string->number \"1+nan.0i\"))").written
-        == "\"1+nan.0i\""
+      try r5rsEvaluate("(number->string (string->number \"1+nan.0i\"))").written == "\"1+nan.0i\""
     )
   }
 
@@ -46,7 +42,7 @@ import Testing
       ("#b1#", "2.0"), ("#i#b1#", "2.0"), ("#b#i1#", "2.0"), ("#o7#", "56.0"), ("#d12#", "120.0"),
       ("#xF#", "240.0"), ("#xF##", "3840.0"), ("1#", "10.0"), ("1##", "100.0"), (".1#", "0.1"),
       ("1.#", "1.0"), ("1#.", "10.0"), ("1#.#", "10.0"), ("1.2#", "1.2"), ("1#e2", "1000.0"),
-      ("#b1#/1", "2.0"), ("#xF#/A#", "1.5"), ("1+2#i", "1+20.0i")
+      ("#b1#/1", "2.0"), ("#xF#/A#", "1.5"), ("1+2#i", "1+20.0i"),
     ]
     for item in cases {
       let value = try r5rsEvaluate(item.literal)
@@ -66,7 +62,7 @@ import Testing
     let exact: [(String, String)] = [
       ("0", "0"), ("+12", "12"), ("-12", "-12"), ("1/2", "1/2"), ("#e1.0", "1"), ("#e1e2", "100"),
       ("#e1e-2", "1/100"), ("1+2i", "1+2i"), ("1+i", "1+1i"), ("-1-i", "-1-1i"), ("+i", "0+1i"),
-      ("-i", "0-1i"), ("#b1+1i", "1+1i"), ("#o7/7", "1"), ("#xF/A", "3/2")
+      ("-i", "0-1i"), ("#b1+1i", "1+1i"), ("#o7/7", "1"), ("#xF/A", "3/2"),
     ]
     for (literal, written) in exact {
       let value = try r5rsEvaluate(literal)
@@ -78,7 +74,7 @@ import Testing
       ("1.0", "1.0"), (".5", "0.5"), ("1.", "1.0"), ("1e2", "100.0"), ("1e-2", "0.01"),
       ("1.2e+2", "120.0"), ("#i1", "1.0"), ("#i1/2", "0.5"), ("#i+i", "0+1.0i"),
       ("#i1+i", "1.0+1.0i"), ("#i1-i", "1.0-1.0i"), ("1e+2+3i", "100.0+3i"), ("1+2.0i", "1+2.0i"),
-      ("+1.0i", "0+1.0i")
+      ("+1.0i", "0+1.0i"),
     ]
     for (literal, written) in inexact {
       let value = try r5rsEvaluate(literal)
@@ -99,7 +95,7 @@ import Testing
     let invalid = [
       "1e#", "1e2#", "1e+2#", "#e1#", "#e1e#", "#e1e2#", "1#2", "1.#2", "1#.#2", ".#", "#.", "1##2",
       "1.0/2", "1/2.0", "1e2/3", "1/2e3", "1+2#3i", "1++2i", "1+-2i", "1@2@3", "1@2i", "i", "#b1.0",
-      "#o7.0", "#xF.0", "#b1e2", "#b#b1", "#e#e1", "#i#i1", "#b#x1", "#e#b1#"
+      "#o7.0", "#xF.0", "#b1e2", "#b#b1", "#e#e1", "#i#i1", "#b#x1", "#e#b1#",
     ]
     for literal in invalid { try r5rsExpectError(literal, literal) }
     try r5rsExpectError("(rationalize 1 -1)", "negative rationalize tolerance")
@@ -111,7 +107,7 @@ import Testing
       ("(rationalize (inexact->exact .3) 1/10)", "1/3"), ("(rationalize 3/5 1/10)", "1/2"),
       ("(rationalize 2/7 1/5)", "1/3"), ("(rationalize -3/5 1/10)", "-1/2"),
       ("(rationalize -2/7 1/5)", "-1/3"), ("(rationalize 0 0)", "0"), ("(rationalize 0 1/10)", "0"),
-      ("(rationalize 1/3 0)", "1/3"), ("(rationalize 1/2 1/2)", "0")
+      ("(rationalize 1/3 0)", "1/3"), ("(rationalize 1/2 1/2)", "0"),
     ]
     for item in cases {
       #expect(
@@ -128,7 +124,7 @@ import Testing
       ("(rationalize .3 1/10)", "1/3", "1/10", "0.3333333333333333"),
       ("(rationalize 0.3 0.1)", "1/3", "0.1", "0.3333333333333333"),
       ("(rationalize -0.3 0.1)", "-1/3", "0.1", "-0.3333333333333333"),
-      ("(rationalize 1 0.0)", "1", "0", "1.0")
+      ("(rationalize 1 0.0)", "1", "0", "1.0"),
     ]
     for item in cases {
       let value = try r5rsEvaluate(item.expression)
@@ -154,7 +150,7 @@ import Testing
       ("(rationalize 1 -1/10)", "negative rational tolerance"),
       ("(rationalize 1 -0.1)", "negative inexact tolerance"),
       ("(rationalize 1+2i 1/10)", "complex value"), ("(rationalize 1 1+2i)", "complex tolerance"),
-      ("(rationalize 1)", "missing tolerance"), ("(rationalize 1 1 1)", "extra tolerance")
+      ("(rationalize 1)", "missing tolerance"), ("(rationalize 1 1 1)", "extra tolerance"),
     ]
     for (expression, label) in invalid { try r5rsExpectError(expression, label) }
   }
@@ -260,11 +256,14 @@ import Testing
       )
     let source = try String(contentsOf: fixtureURL, encoding: .utf8)
     var captured = ""
-    let interpreter = Interpreter(output: { captured += $0 })
+    let interpreter = Interpreter { captured += $0 }
     _ = try interpreter.evaluate(source)
 
     let expected =
-      "(93326215443944152681699238856266700490715968264381621468592963895217599993229915608941463976156518286253697920827223758251185210916864000000000000000000000000 41/42 12345678901234567899-1493827147049382714249/77i #t #t #t 500000000000000000000 0.3333333333333333)\n"
+      "(933262154439441526816992388562667004907159682643816214685929638952175999932299156089414"
+      + "63976156518286253697920827223758251185210916864000000000000000000000000 41/42 "
+      + "12345678901234567899-1493827147049382714249/77i #t #t #t 500000000000000000000 "
+      + "0.3333333333333333)\n"
     #expect(captured == expected)
   }
 

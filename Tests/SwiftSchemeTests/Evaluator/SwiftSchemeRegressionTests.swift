@@ -3,7 +3,7 @@ import SwiftScheme
 import Testing
 
 @MainActor private func printed(_ source: String) throws -> String {
-  try Interpreter(output: { _ in }).evaluate(source).written
+  try Interpreter { _ in }.evaluate(source).written
 }
 
 @MainActor private func expect(_ source: String, _ expected: String, _ label: String) throws {
@@ -49,7 +49,8 @@ import Testing
     try expect("(or #f #f 'ok)", "ok", "or")
     try expect("(let ((x 1)) (let* ((x (+ x 1)) (y (+ x 1))) (list x y)))", "(2 3)", "let family")
     try expect(
-      "(letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))) (odd? (lambda (n) (if (= n 0) #f (even? (- n 1)))))) (even? 20))",
+      "(letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))) (odd? (lambda (n) (if (= n "
+        + "0) #f (even? (- n 1)))))) (even? 20))",
       "#t",
       "letrec"
     )
@@ -91,7 +92,8 @@ import Testing
       "cyclic vector writer"
     )
     try expect(
-      "(let ((a (vector #f)) (b (vector #f))) (vector-set! a 0 a) (vector-set! b 0 b) (equal? a b))",
+      "(let ((a (vector #f)) (b (vector #f))) (vector-set! a 0 a) (vector-set! b 0 b) (equal? "
+        + "a b))",
       "#t",
       "cyclic vector equality"
     )
@@ -105,7 +107,8 @@ import Testing
 
     try expect("(= 9007199254740992 9007199254740993)", "#f", "exact integer comparison")
     try expect(
-      "(list (gcd 32 -36) (lcm 4 6) (modulo -13 4) (quotient -13 4) (number->string 255 16) (string->number \"ff\" 16))",
+      "(list (gcd 32 -36) (lcm 4 6) (modulo -13 4) (quotient -13 4) (number->string 255 16) "
+        + "(string->number \"ff\" 16))",
       "(4 12 3 -3 \"ff\" 255)",
       "numeric library"
     )
@@ -115,7 +118,8 @@ import Testing
       "round ties to even"
     )
     try expect(
-      "(list (odd? 3.0) (even? 4.0) (quotient 7.0 2) (remainder 7 2.0) (modulo -13.0 4) (gcd 32.0 -36) (lcm 4 6.0))",
+      "(list (odd? 3.0) (even? 4.0) (quotient 7.0 2) (remainder 7 2.0) (modulo -13.0 4) (gcd "
+        + "32.0 -36) (lcm 4 6.0))",
       "(#t #t 3.0 1.0 3.0 4.0 12.0)",
       "integer procedures accept inexact integers"
     )
@@ -142,17 +146,20 @@ import Testing
       "exact square roots and magnitudes"
     )
     try expect(
-      "(list (= 9007199254740993 9007199254740992.0) (> 9007199254740993 9007199254740992.0) (< -9007199254740993 -9007199254740992.0))",
+      "(list (= 9007199254740993 9007199254740992.0) (> 9007199254740993 9007199254740992.0) "
+        + "(< -9007199254740993 -9007199254740992.0))",
       "(#f #t #t)",
       "mixed exact binary64 comparisons"
     )
     try expect(
-      "(list (string->number \"1 2\") (string->number \"3/2junk\") (string->number \"+i\") (string->number \"-i\"))",
+      "(list (string->number \"1 2\") (string->number \"3/2junk\") (string->number \"+i\") "
+        + "(string->number \"-i\"))",
       "(#f #f 0+1i 0-1i)",
       "numeric reader consumes complete datum"
     )
     try expect(
-      "(let ((n 123456789012345678901234567890123456789)) (= n (string->number (number->string n))))",
+      "(let ((n 123456789012345678901234567890123456789)) (= n (string->number (number->string "
+        + "n))))",
       "#t",
       "bignum number string round trip"
     )
@@ -266,12 +273,14 @@ import Testing
       "let-syntax"
     )
     try expect(
-      "(define-syntax flatten (syntax-rules () ((flatten ((x ...) ...)) (list x ... ...)))) (flatten ((1 2) (3 4)))",
+      "(define-syntax flatten (syntax-rules () ((flatten ((x ...) ...)) (list x ... ...)))) "
+        + "(flatten ((1 2) (3 4)))",
       "(1 2 3 4)",
       "nested syntax-rules ellipses"
     )
     try expect(
-      "(define-syntax flatten (syntax-rules () ((flatten ((x ...) ...)) (list x ... ...)))) (flatten (() (1) ()))",
+      "(define-syntax flatten (syntax-rules () ((flatten ((x ...) ...)) (list x ... ...)))) "
+        + "(flatten (() (1) ()))",
       "(1)",
       "nested syntax-rules empty repetitions"
     )
@@ -301,11 +310,11 @@ import Testing
     _ = try interpreter.evaluate("(display \"hello\") (write '(1 2)) (write-char #\\!) (newline)")
     #expect(output == "hello(1 2)!\n", "output procedures")
 
-    let multiline = Interpreter(output: { _ in })
+    let multiline = Interpreter { _ in }
     #expect(!multiline.isComplete("(let ((x 1))"), "incomplete multiline form")
     #expect(multiline.isComplete("(let ((x 1))\n(+ x 2))"), "complete multiline form")
 
-    let heapInterpreter = Interpreter(output: { _ in })
+    let heapInterpreter = Interpreter { _ in }
     let baseline = heapInterpreter.heapStatistics
     _ = try heapInterpreter.evaluate(
       "(define survivor (let ((v (vector #f))) (vector-set! v 0 v) v))"
@@ -323,9 +332,10 @@ import Testing
     )
     #expect(afterCollection.live >= baseline.live, "cycle collector preserves baseline roots")
 
-    let continuationHeap = Interpreter(output: { _ in })
+    let continuationHeap = Interpreter { _ in }
     _ = try continuationHeap.evaluate(
-      "(define saved #f) (define phase 0) (define result #f) (set! result (call/cc (lambda (k) (set! saved k) 'initial)))"
+      "(define saved #f) (define phase 0) (define result #f) (set! result (call/cc (lambda (k) "
+        + "(set! saved k) 'initial)))"
     )
     _ = continuationHeap.collectGarbage()
     _ = try continuationHeap.evaluate(

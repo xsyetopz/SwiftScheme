@@ -3,7 +3,7 @@ import Testing
 
 @MainActor private func expectR5RSyntaxError(_ source: String, _ label: String) {
   do {
-    _ = try Interpreter(output: { _ in }).evaluate(source)
+    _ = try Interpreter { _ in }.evaluate(source)
     #expect(Bool(false), "\(label): expected a syntax error")
   } catch let error as SchemeError {
     guard case .syntax = error else {
@@ -14,11 +14,10 @@ import Testing
 }
 
 @Suite("R5RS §4.3 and §5 definition/macro grammar") @MainActor struct R5RSMacroDefinitionTests {
-  @Test("top-level syntax bindings shadow existing value bindings") func syntaxShadowsValue() throws {
-    let interpreter = Interpreter(output: { _ in })
-    _ = try interpreter.evaluate(
-      "(define-syntax + (syntax-rules () ((+ left right) left)))"
-    )
+  @Test("top-level syntax bindings shadow existing value bindings") func syntaxShadowsValue() throws
+  {
+    let interpreter = Interpreter { _ in }
+    _ = try interpreter.evaluate("(define-syntax + (syntax-rules () ((+ left right) left)))")
     #expect(try interpreter.evaluate("(+ 20 22)").written == "20")
   }
 
@@ -54,7 +53,7 @@ import Testing
   }
 
   @Test("syntax-rules transcribes dotted templates") func dottedTemplate() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     let result = try interpreter.evaluate(
       """
       (define-syntax make-dotted
@@ -68,7 +67,7 @@ import Testing
 
   @Test("syntax-rules matches dotted patterns and letrec-syntax binds locally")
   func dottedPatternAndLetrecSyntax() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     let result = try interpreter.evaluate(
       """
       (define-syntax capture-tail
@@ -84,7 +83,7 @@ import Testing
   }
 
   @Test("internal definitions form the initial body group") func legalInternalDefinitions() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     let result = try interpreter.evaluate(
       """
       ((lambda ()
@@ -98,7 +97,7 @@ import Testing
 
   @Test("internal definition initializers use the shared body region")
   func internalDefinitionRegion() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     let result = try interpreter.evaluate(
       "((lambda () (define read-later (lambda () later)) (define later 42) (read-later)))"
     )
@@ -123,7 +122,7 @@ import Testing
 
   @Test("lexical variables shadow macros during body classification")
   func lexicalVariableShadowsMacroDuringValidation() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     _ = try interpreter.evaluate("(define-syntax m (syntax-rules () ((m) (define shadowed 1))))")
     #expect(try interpreter.evaluate("((lambda (m) 1 (m)) (lambda () 8))").written == "8")
   }
@@ -139,7 +138,7 @@ import Testing
   func syntacticKeywordDefinitions() throws {
     expectR5RSyntaxError("(define define 3)", "define keyword")
     expectR5RSyntaxError("(begin (define begin list))", "begin keyword")
-    let topLevel = Interpreter(output: { _ in })
+    let topLevel = Interpreter { _ in }
     _ = try topLevel.evaluate("(define-syntax if (syntax-rules () ((if x y) (+ x y))))")
     #expect(try topLevel.evaluate("(if 20 22)").written == "42")
     expectR5RSyntaxError("((lambda () (define x 1) (define x 2) x))", "duplicate internal")
@@ -147,7 +146,7 @@ import Testing
       "(let-syntax ((m (syntax-rules () ((m) 1))) (m (syntax-rules () ((m) 2)))) (m))",
       "duplicate let-syntax binding"
     )
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     #expect(try interpreter.evaluate("((lambda (if) if) 1)").written == "1")
     #expect(try interpreter.evaluate("(let ((if 1)) (set! if 2) if)").written == "2")
     #expect(
@@ -157,20 +156,20 @@ import Testing
 
   @Test("a value binding named define is an ordinary operator")
   func formalNamedDefineShadowsDefinitionSyntax() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     #expect(try interpreter.evaluate("((lambda (define) (define 20 22)) +)").written == "42")
   }
 
   @Test("internal definition names shadow outer macros during body expansion")
   func internalDefinitionPrebindingShadowsMacro() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     _ = try interpreter.evaluate("(define-syntax m (syntax-rules () ((m) (define late 1))))")
     #expect(try interpreter.evaluate("((lambda () (define m (lambda () 8)) 1 (m)))").written == "8")
   }
 
   @Test("macro-generated leading definitions prebind before later expansion")
   func macroGeneratedLeadingDefinitionPrebinding() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     let result = try interpreter.evaluate(
       """
       (define-syntax define-name
@@ -184,7 +183,7 @@ import Testing
 
   @Test("letrec initializer closures retain the enclosing binding cells")
   func letrecInitializerLexicalRegion() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     let result = try interpreter.evaluate(
       "(letrec ((x (lambda () x)) (get (lambda () x))) " + "(define x 2) (procedure? (get)))"
     )
@@ -228,7 +227,7 @@ import Testing
   }
 
   @Test("begin splices an initial definition group") func beginDefinitionGroup() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     let result = try interpreter.evaluate("((lambda () (begin (define local 40)) (+ local 2)))")
     #expect(result.written == "42")
   }

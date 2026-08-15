@@ -8,28 +8,26 @@ extension Interpreter {
   func installNumericPrimitives(in env: SchemeEnvironment) {
     primitive("+", in: env) { args in
       var result = SchemeNumber.zero
-      for value in args { result = result + (try schemeNumber(value)) }
+      for value in args { result += try schemeNumber(value) }
       return numberValue(result)
     }
     primitive("*", in: env) { args in
       var result = SchemeNumber.one
-      for value in args { result = result * (try schemeNumber(value)) }
+      for value in args { result *= try schemeNumber(value) }
       return numberValue(result)
     }
     primitive("-", in: env) { args in
       guard let first = args.first else { throw SchemeError.arity("- expects at least 1 argument") }
       var result = try schemeNumber(first)
       if args.count == 1 { return numberValue(-result) }
-      for value in args.dropFirst() { result = result - (try schemeNumber(value)) }
+      for value in args.dropFirst() { result -= try schemeNumber(value) }
       return numberValue(result)
     }
     primitive("/", in: env) { args in
       guard let first = args.first else { throw SchemeError.arity("/ expects at least 1 argument") }
       var result = args.count == 1 ? SchemeNumber.one : try schemeNumber(first)
       for value in args.count == 1 ? args[...] : args.dropFirst() {
-        do {
-          result = try result / schemeNumber(value)
-        } catch BigIntError.divisionByZero {
+        do { result = try result / schemeNumber(value) } catch BigIntError.divisionByZero {
           throw SchemeError.numeric("division by zero")
         }
       }
@@ -106,7 +104,7 @@ extension Interpreter {
     }
     for (name, operation) in [
       ("quotient", { try $0.quotient(dividingBy: $1) }),
-      ("remainder", { try $0.remainder(dividingBy: $1) }), ("modulo", { try $0.modulo($1) })
+      ("remainder", { try $0.remainder(dividingBy: $1) }), ("modulo", { try $0.modulo($1) }),
     ] as [(String, (BigInt, BigInt) throws -> BigInt)] {
       primitive(name, in: env) { args in
         try require(args, 2, name)
@@ -145,7 +143,7 @@ extension Interpreter {
     }
     for (name, rule) in [
       ("floor", Rational.Rounding.floor), ("ceiling", .ceiling), ("truncate", .truncate),
-      ("round", .nearestEven)
+      ("round", .nearestEven),
     ] {
       primitive(name, in: env) { args in
         try require(args, 1, name)

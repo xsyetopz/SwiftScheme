@@ -17,10 +17,13 @@ extension Interpreter {
       guard arguments.count >= 2 else {
         throw SchemeError.arity("apply expects at least 2 arguments")
       }
+      guard let finalArgument = arguments.last else {
+        throw SchemeError.arity("apply expects a final list")
+      }
       control = .apply(
         arguments[0],
         Array(arguments.dropFirst().dropLast())
-          + (try array(from: arguments.last!, context: "apply final argument"))
+          + (try array(from: finalArgument, context: "apply final argument"))
       )
     case .callCC:
       try require(arguments, 1, "call-with-current-continuation")
@@ -58,7 +61,7 @@ extension Interpreter {
         throw SchemeError.type("eval expects an environment")
       }
       if case .pair(let form) = arguments[0], case .symbol(let keyword) = form.car,
-        (keyword == "define" || keyword == "define-syntax"), environment.cell(keyword) == nil,
+        keyword == "define" || keyword == "define-syntax", environment.cell(keyword) == nil,
         environment.macro(keyword) == nil
       {
         try environment.requireDefinitionAllowed()
@@ -122,7 +125,8 @@ extension Interpreter {
         let state = DynamicFilePort(path, .input)
         let before = Value.procedure(
           Procedure(
-            .primitive("with-input-from-file before") { [unowned self] args in
+            .primitive("with-input-from-file before") { [weak self] args in
+              guard let self else { throw SchemeError.io("interpreter was reclaimed") }
               try require(args, 0, "with-input-from-file before")
               let opened: SchemePort
               do {
@@ -141,7 +145,8 @@ extension Interpreter {
         )
         let after = Value.procedure(
           Procedure(
-            .primitive("with-input-from-file after") { [unowned self] args in
+            .primitive("with-input-from-file after") { [weak self] args in
+              guard let self else { throw SchemeError.io("interpreter was reclaimed") }
               try require(args, 0, "with-input-from-file after")
               return try finishDynamicFile(
                 state,
@@ -189,7 +194,8 @@ extension Interpreter {
         let state = DynamicFilePort(path, .output)
         let before = Value.procedure(
           Procedure(
-            .primitive("with-output-to-file before") { [unowned self] args in
+            .primitive("with-output-to-file before") { [weak self] args in
+              guard let self else { throw SchemeError.io("interpreter was reclaimed") }
               try require(args, 0, "with-output-to-file before")
               let opened: SchemePort
               do {
@@ -206,7 +212,8 @@ extension Interpreter {
         )
         let after = Value.procedure(
           Procedure(
-            .primitive("with-output-to-file after") { [unowned self] args in
+            .primitive("with-output-to-file after") { [weak self] args in
+              guard let self else { throw SchemeError.io("interpreter was reclaimed") }
               try require(args, 0, "with-output-to-file after")
               return try finishDynamicFile(
                 state,

@@ -81,6 +81,18 @@ package func predicate(_ args: [Value], _ name: String, _ test: (Value) -> Bool)
   return .boolean(test(args[0]))
 }
 
+package func requiredRational(_ numerator: BigInt, _ denominator: BigInt = .one) -> Rational {
+  guard let value = Rational(numerator, denominator) else {
+    preconditionFailure("Rational invariant violated")
+  }
+  return value
+}
+
+package func requiredRationalDivision(_ lhs: Rational, _ rhs: Rational) -> Rational {
+  guard let value = try? lhs / rhs else { preconditionFailure("Rational invariant violated") }
+  return value
+}
+
 package func compareReal(_ lhs: RealComponent, _ rhs: RealComponent) -> Int? {
   switch (lhs, rhs) {
   case (.exact(let a), .exact(let b)): return a == b ? 0 : (a < b ? -1 : 1)
@@ -91,7 +103,7 @@ package func compareReal(_ lhs: RealComponent, _ rhs: RealComponent) -> Int? {
     guard !b.isNaN else { return nil }
     if b == .infinity { return -1 }
     if b == -.infinity { return 1 }
-    let exactB = Rational.fromFiniteDouble(b)!
+    guard let exactB = Rational.fromFiniteDouble(b) else { return nil }
     return a == exactB ? 0 : (a < exactB ? -1 : 1)
   case (.inexact(let a), .exact(let b)):
     guard let comparison = compareReal(.exact(b), .inexact(a)) else { return nil }
@@ -260,12 +272,15 @@ package func rationalized(_ value: Value, _ tolerance: Value) throws -> SchemeNu
     if a.signum <= 0 && b.signum >= 0 { return Rational(0) }
     let floorA = a.rounded(.floor)
     let floorB = b.rounded(.floor)
-    if floorA < floorB { return Rational(floorA + .one)! }
-    let fractionalA = a - Rational(floorA)!
-    let fractionalB = b - Rational(floorB)!
-    if fractionalA.isZero { return Rational(floorA)! }
-    let reciprocal = simplest(try! (Rational.one / fractionalB), try! (Rational.one / fractionalA))
-    return Rational(floorA)! + (try! (Rational.one / reciprocal))
+    if floorA < floorB { return requiredRational(floorA + .one) }
+    let fractionalA = a - requiredRational(floorA)
+    let fractionalB = b - requiredRational(floorB)
+    if fractionalA.isZero { return requiredRational(floorA) }
+    let reciprocal = simplest(
+      requiredRationalDivision(.one, fractionalB),
+      requiredRationalDivision(.one, fractionalA)
+    )
+    return requiredRational(floorA) + requiredRationalDivision(.one, reciprocal)
   }
   let result = simplest(low, high)
   return x.1 || y.1 ? SchemeNumber(result).inexact() : SchemeNumber(result)

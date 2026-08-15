@@ -6,7 +6,7 @@ let package = Package(
   platforms: [.macOS(.v14)],
   products: [
     .library(name: "SwiftScheme", targets: ["SwiftScheme"]),
-    .executable(name: "swiftscheme", targets: ["SwiftSchemeCLI"])
+    .executable(name: "swiftscheme", targets: ["SwiftSchemeCLI"]),
   ],
   targets: [
     .target(name: "SwiftSchemeNumeric", path: "Sources/SwiftScheme/Numeric"),
@@ -46,7 +46,7 @@ let package = Package(
       name: "SwiftSchemeTests",
       dependencies: ["SwiftScheme"],
       path: "Tests/SwiftSchemeTests"
-    )
+    ),
   ],
   swiftLanguageModes: [.v6]
 )

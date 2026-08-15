@@ -2,7 +2,7 @@ import SwiftScheme
 import Testing
 
 @MainActor private func evaluateDerived(_ source: String) throws -> Value {
-  try Interpreter(output: { _ in }).evaluate(source)
+  try Interpreter { _ in }.evaluate(source)
 }
 
 @MainActor private func expectDerivedError(_ source: String, _ label: String) {
@@ -51,23 +51,22 @@ struct R5RSDerivedControlTests {
     expectDerivedError("(do ((x 0) (x 1)) ((= x 0) x))", "duplicate do variable")
   }
 
-  @Test("case permits no clauses and rejects duplicate datums") func caseGrammarBoundaries() throws {
+  @Test("case permits no clauses and rejects duplicate datums") func caseGrammarBoundaries() throws
+  {
     #expect(try evaluateDerived("(case 1)").written == "#<unspecified>")
     expectDerivedError("(case 1 ((1 1) 'ok))", "duplicate case datum")
   }
 
   @Test("dynamic-wind discards all before and after values") func dynamicWindHookValues() throws {
     let result = try evaluateDerived(
-      "(dynamic-wind (lambda () (values 1 2)) "
-        + "(lambda () 42) (lambda () (values 3 4)))"
+      "(dynamic-wind (lambda () (values 1 2)) " + "(lambda () 42) (lambda () (values 3 4)))"
     )
     #expect(result.written == "42")
   }
 
   @Test("for-each discards all procedure values") func forEachProcedureValues() throws {
     let result = try evaluateDerived(
-      "(call-with-output-string (lambda (p) "
-        + "(for-each (lambda (x) (values x (+ x 1))) '(1 2)) "
+      "(call-with-output-string (lambda (p) " + "(for-each (lambda (x) (values x (+ x 1))) '(1 2)) "
         + "(display (symbol->string 'done) p)))"
     )
     #expect(result.written == "\"done\"")

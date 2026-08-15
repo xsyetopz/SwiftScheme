@@ -35,7 +35,7 @@ import Testing
   probe: String,
   _ label: String
 ) throws {
-  let interpreter = Interpreter(output: { _ in })
+  let interpreter = Interpreter { _ in }
   _ = try interpreter.evaluate("(define r5rs-target \(environmentExpression))")
 
   expectSyntaxError(
@@ -51,21 +51,21 @@ import Testing
 @Suite("R5RS environment definition policy") @MainActor struct R5RSEnvironmentTests {
   @Test("scheme-report-environment preserves expression evaluation")
   func reportEnvironmentEvaluatesExpressions() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     _ = try interpreter.evaluate("(define r5rs-target (scheme-report-environment 5))")
     #expect(try interpreter.evaluate("(eval '(+ 20 22) r5rs-target)").written == "42")
   }
 
   @Test("null-environment preserves syntax and literal evaluation")
   func nullEnvironmentEvaluatesExpressions() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     _ = try interpreter.evaluate("(define r5rs-target (null-environment 5))")
     #expect(try interpreter.evaluate("(eval '(if #f 1 2) r5rs-target)").written == "2")
   }
 
   @Test("scheme-report-environment excludes implementation-only extensions")
   func reportEnvironmentExcludesExtensions() throws {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     _ = try interpreter.evaluate("(define r5rs-target (scheme-report-environment 5))")
     for name in ["open-input-string", "call-with-input-string", "flush-output", "error"] {
       expectUnbound(
@@ -119,7 +119,7 @@ import Testing
   }
 
   @Test("optional transcript procedures are omitted") func transcriptProceduresAreNotAdvertised() {
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     expectUnbound({ try interpreter.evaluate("transcript-on") }, "transcript-on")
     expectUnbound({ try interpreter.evaluate("transcript-off") }, "transcript-off")
   }

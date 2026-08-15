@@ -99,7 +99,8 @@ public final class SchemePort {
     self.mode = mode
     self.handle = handle
     if mode == .input {
-      input = scalarCharacters(String(decoding: handle.readDataToEndOfFile(), as: UTF8.self))
+      let data = handle.readDataToEndOfFile()
+      input = scalarCharacters(String(data: data, encoding: .utf8) ?? "")
     } else {
       sink = { text in
         do { try handle.write(contentsOf: Data(text.utf8)) } catch {

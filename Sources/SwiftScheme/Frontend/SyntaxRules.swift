@@ -59,7 +59,7 @@ package func isFalse(_ value: Value) -> Bool {
 
 indirect enum Capture {
   case value(Value)
-  case sequence([Capture])
+  case sequence([Self])
 }
 
 package final class SyntaxRules: SchemeMacro {
@@ -84,13 +84,9 @@ package final class SyntaxRules: SchemeMacro {
     }
     self.keyword = keyword
     self.ellipsis = "..."
-    guard form.count >= 2 else {
-      throw SchemeError.syntax("syntax-rules requires a literals list")
-    }
+    guard form.count >= 2 else { throw SchemeError.syntax("syntax-rules requires a literals list") }
     let literalValues: [Value]
-    do {
-      literalValues = try array(from: form[1], context: "syntax-rules literals")
-    } catch {
+    do { literalValues = try array(from: form[1], context: "syntax-rules literals") } catch {
       throw SchemeError.syntax("syntax-rules literals must be a proper list")
     }
     let literalNames = try literalValues.map { try identifier($0, "syntax-rules literal") }
@@ -193,30 +189,24 @@ package final class SyntaxRules: SchemeMacro {
     return name == ellipsis
   }
 
-  private func walkPattern(
-    _ value: Value,
-    head: Bool,
-    into variables: inout Set<String>
-  ) throws {
+  private func walkPattern(_ value: Value, head: Bool, into variables: inout Set<String>) throws {
     switch value {
     case .symbol(let name):
-      guard !head, name != "_", !literals.contains(name), name != keyword, !isEllipsis(value)
-      else { return }
+      guard !head, name != "_", !literals.contains(name), name != keyword, !isEllipsis(value) else {
+        return
+      }
       guard variables.insert(name).inserted else {
         throw SchemeError.syntax("duplicate syntax-rules pattern variable \(name)")
       }
-    case .pair:
-      try validatePatternSequence(value, head: false, into: &variables)
-    case .vector(let vector):
-      try validateVectorPatternSequence(vector.elements, into: &variables)
+    case .pair: try validatePatternSequence(value, head: false, into: &variables)
+    case .vector(let vector): try validateVectorPatternSequence(vector.elements, into: &variables)
     default: break
     }
   }
 
-  private func validateVectorPatternSequence(
-    _ elements: [Value],
-    into variables: inout Set<String>
-  ) throws {
+  private func validateVectorPatternSequence(_ elements: [Value], into variables: inout Set<String>)
+    throws
+  {
     var previousWasPattern = false
     for (index, element) in elements.enumerated() {
       if isEllipsis(element) {
@@ -235,7 +225,7 @@ package final class SyntaxRules: SchemeMacro {
     let core: Set<String> = [
       "quote", "if", "begin", "lambda", "define", "set!", "let", "let*", "letrec", "and", "or",
       "cond", "case", "do", "delay", "quasiquote", "unquote", "unquote-splicing", "let-syntax",
-      "letrec-syntax", "define-syntax", "syntax-rules", "else", "=>"
+      "letrec-syntax", "define-syntax", "syntax-rules", "else", "=>",
     ]
     var result = Set<String>()
     for (pattern, template) in rules {

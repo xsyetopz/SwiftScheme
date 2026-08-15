@@ -1,8 +1,8 @@
 import Foundation
-import SwiftSchemeRuntime
 import SwiftSchemeFrontend
-import SwiftSchemePrimitives
 import SwiftSchemeNumeric
+import SwiftSchemePrimitives
+import SwiftSchemeRuntime
 
 extension Interpreter {
   func installControlAndIOPrimitives(in env: SchemeEnvironment) {
@@ -44,16 +44,19 @@ extension Interpreter {
       }
       return .environment(SchemeEnvironment(definitionPolicy: .fixed))
     }
-    primitive("interaction-environment", in: env) { [unowned self] in
+    primitive("interaction-environment", in: env) { [weak self] in
+      guard let self else { throw SchemeError.io("interpreter was reclaimed") }
       try require($0, 0, "interaction-environment")
       return .environment(global)
     }
 
-    primitive("current-input-port", in: env) { [unowned self] in
+    primitive("current-input-port", in: env) { [weak self] in
+      guard let self else { throw SchemeError.io("interpreter was reclaimed") }
       try require($0, 0, "current-input-port")
       return .port(currentInput)
     }
-    primitive("current-output-port", in: env) { [unowned self] in
+    primitive("current-output-port", in: env) { [weak self] in
+      guard let self else { throw SchemeError.io("interpreter was reclaimed") }
       try require($0, 0, "current-output-port")
       return .port(currentOutput)
     }
@@ -89,46 +92,54 @@ extension Interpreter {
     }
     primitive("close-input-port", in: env) { try closePort($0, .input, "close-input-port") }
     primitive("close-output-port", in: env) { try closePort($0, .output, "close-output-port") }
-    primitive("read", in: env) { [unowned self] args in
+    primitive("read", in: env) { [weak self] args in
+      guard let self else { throw SchemeError.io("interpreter was reclaimed") }
       let port = try inputPort(args, currentInput, "read")
       var reader = Reader(port.input, start: port.position)
       let value = try reader.readOne()
       port.position = reader.index
       return value ?? .eof
     }
-    primitive("read-char", in: env) { [unowned self] args in
+    primitive("read-char", in: env) { [weak self] args in
+      guard let self else { throw SchemeError.io("interpreter was reclaimed") }
       let port = try inputPort(args, currentInput, "read-char")
       guard port.position < port.input.count else { return .eof }
       defer { port.position += 1 }
       return .character(port.input[port.position])
     }
-    primitive("peek-char", in: env) { [unowned self] args in
+    primitive("peek-char", in: env) { [weak self] args in
+      guard let self else { throw SchemeError.io("interpreter was reclaimed") }
       let port = try inputPort(args, currentInput, "peek-char")
       return port.position < port.input.count ? .character(port.input[port.position]) : .eof
     }
     primitive("eof-object?", in: env) {
       try predicate($0, "eof-object?") { if case .eof = $0 { true } else { false } }
     }
-    primitive("char-ready?", in: env) { [unowned self] args in
+    primitive("char-ready?", in: env) { [weak self] args in
+      guard let self else { throw SchemeError.io("interpreter was reclaimed") }
       _ = try inputPort(args, currentInput, "char-ready?")
       return .boolean(true)
     }
-    primitive("write", in: env) { [unowned self] args in
+    primitive("write", in: env) { [weak self] args in
+      guard let self else { throw SchemeError.io("interpreter was reclaimed") }
       let (value, port) = try outputArguments(args, currentOutput, "write")
       try emit(value.written, to: port)
       return .unspecified
     }
-    primitive("display", in: env) { [unowned self] args in
+    primitive("display", in: env) { [weak self] args in
+      guard let self else { throw SchemeError.io("interpreter was reclaimed") }
       let (value, port) = try outputArguments(args, currentOutput, "display")
       try emit(value.displayed, to: port)
       return .unspecified
     }
-    primitive("newline", in: env) { [unowned self] args in
+    primitive("newline", in: env) { [weak self] args in
+      guard let self else { throw SchemeError.io("interpreter was reclaimed") }
       let port = try outputPort(args, currentOutput, "newline")
       try emit("\n", to: port)
       return .unspecified
     }
-    primitive("write-char", in: env) { [unowned self] args in
+    primitive("write-char", in: env) { [weak self] args in
+      guard let self else { throw SchemeError.io("interpreter was reclaimed") }
       guard args.count == 1 || args.count == 2 else {
         throw SchemeError.arity("write-char expects 1 or 2 arguments")
       }
@@ -151,7 +162,8 @@ extension Interpreter {
       try require(args, 1, "get-output-string")
       return .string(SchemeString(try port(args[0], .output, "get-output-string").output))
     }
-    primitive("flush-output", in: env) { [unowned self] args in
+    primitive("flush-output", in: env) { [weak self] args in
+      guard let self else { throw SchemeError.io("interpreter was reclaimed") }
       _ = try outputPort(args, currentOutput, "flush-output")
       return .unspecified
     }

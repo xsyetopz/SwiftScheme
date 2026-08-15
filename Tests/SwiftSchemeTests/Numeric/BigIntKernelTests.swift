@@ -20,7 +20,7 @@ func runBigIntKernelChecks() throws {
         let division = try x.quotientAndRemainder(dividingBy: y)
         expect(division.quotient.exactInt64 == a / b, "quotient \(a), \(b)")
         expect(division.remainder.exactInt64 == a % b, "remainder \(a), \(b)")
-        let schemeModulo = a % b == 0 || (a < 0) == (b < 0) ? a % b : a % b + b
+        let schemeModulo = a.isMultiple(of: b) || (a < 0) == (b < 0) ? a % b : a % b + b
         let modulo = try x.modulo(y)
         expect(modulo.exactInt64 == schemeModulo, "modulo \(a), \(b)")
       }

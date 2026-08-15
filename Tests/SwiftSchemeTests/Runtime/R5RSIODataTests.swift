@@ -3,7 +3,7 @@ import SwiftScheme
 import Testing
 
 @MainActor private func evaluateIO(_ source: String) throws -> Value {
-  try Interpreter(output: { _ in }).evaluate(source)
+  try Interpreter { _ in }.evaluate(source)
 }
 
 @MainActor private func expectIOError(_ source: String, _ label: String) {
@@ -89,7 +89,7 @@ import Testing
   func stringCaseOrderingPreservesCharacterBoundaries() throws {
     let equality = try evaluateIO(
       "(let ((a (make-string 2 #\\a)) (b (make-string 2 #\\a)) " + "(mark (integer->char 768))) "
-        + "(string-set! b 0 #\\A) (string-set! a 1 mark) " + "(string-set! b 1 mark) "
+        + "" + "(string-set! b 0 #\\A) (string-set! a 1 mark) " + "(string-set! b 1 mark) "
         + "(list (string-length a) (string-length b) "
         + "(char-ci=? (string-ref a 0) (string-ref b 0)) "
         + "(char-ci=? (string-ref a 1) (string-ref b 1)) " + "(string-ci=? a b)))"
@@ -189,7 +189,7 @@ import Testing
     #expect(string.characters.count == 2)
     #expect(string.characters.allSatisfy { $0.unicodeScalars.count == 1 })
 
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     let stringRead = try interpreter.read(Value.string(string).written)
     #expect(stringRead.count == 1)
     if case .string(let roundTrip) = stringRead.first {
@@ -267,12 +267,14 @@ import Testing
     )
     #expect(
       try evaluateIO(
-        "(call-with-input-string \"\\\"abc\\\"\" (lambda (p) (let ((s (read p))) (string-set! s 1 #\\z) s)))"
+        "(call-with-input-string \"\\\"abc\\\"\" (lambda (p) (let ((s (read p))) (string-set! s "
+          + "1 #\\z) s)))"
       ).written == "\"azc\""
     )
     #expect(
       try evaluateIO(
-        "(call-with-input-string \"#(1 2)\" (lambda (p) (let ((v (read p))) (vector-set! v 0 9) v)))"
+        "(call-with-input-string \"#(1 2)\" (lambda (p) (let ((v (read p))) (vector-set! v 0 9) "
+          + "v)))"
       ).written == "#(9 2)"
     )
   }
@@ -328,7 +330,7 @@ import Testing
   func closedCurrentOutputDefaults() {
     let operations = [
       ("(write 'still-writes)", "write"), ("(display 'still-displays)", "display"),
-      ("(newline)", "newline"), ("(write-char #\\!)", "write-char")
+      ("(newline)", "newline"), ("(write-char #\\!)", "write-char"),
     ]
     for (operation, name) in operations {
       expectIOError(
@@ -364,7 +366,8 @@ import Testing
 
   @Test("vectors preserve mutation and list conversion contracts") func vectorMatrix() throws {
     let result = try evaluateIO(
-      "(let ((v (make-vector 3 0))) (vector-fill! v 7) (list (vector-length v) (vector-ref v 1) (vector->list v) (list->vector '(a b))))"
+      "(let ((v (make-vector 3 0))) (vector-fill! v 7) (list (vector-length v) (vector-ref v 1) "
+        + "(vector->list v) (list->vector '(a b))))"
     )
     #expect(result.written == "(3 7 (7 7 7) #(a b))")
     expectIOError("(vector-ref '#(1) 1)", "vector index")
@@ -390,7 +393,7 @@ import Testing
         of: "\"",
         with: "\\\""
       ) + "\""
-    let interpreter = Interpreter(output: { _ in })
+    let interpreter = Interpreter { _ in }
     _ = try interpreter.evaluate("(load \(quotedPath))")
     #expect(try interpreter.evaluate("loaded-value").written == "41")
     #expect(try interpreter.evaluate("(load \(quotedPath))").written == "#<unspecified>")

@@ -1,16 +1,17 @@
 import Foundation
 
 public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible {
-  public static let zero = Rational(0)
-  public static let one = Rational(1)
+  public static let zero = Self(0)
+  public static let one = Self(1)
   public let numerator: BigInt
   public let denominator: BigInt
 
   public init?(_ numerator: BigInt, _ denominator: BigInt = .one) {
     guard !denominator.isZero else { return nil }
     let divisor = BigInt.gcd(numerator, denominator)
-    let reducedNumerator = try! numerator.quotient(dividingBy: divisor)
-    let reducedDenominator = try! denominator.quotient(dividingBy: divisor)
+    guard let reducedNumerator = try? numerator.quotient(dividingBy: divisor),
+      let reducedDenominator = try? denominator.quotient(dividingBy: divisor)
+    else { return nil }
     if reducedDenominator.signum < 0 {
       self.numerator = -reducedNumerator
       self.denominator = -reducedDenominator
@@ -25,10 +26,17 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
     denominator = .one
   }
 
+  private static func make(_ numerator: BigInt, _ denominator: BigInt) -> Self {
+    guard let value = Self(numerator, denominator) else {
+      preconditionFailure("Rational invariant violated")
+    }
+    return value
+  }
+
   public var isInteger: Bool { denominator == .one }
   public var isZero: Bool { numerator.isZero }
   public var signum: Int { numerator.signum }
-  public var absoluteValue: Rational { Rational(numerator.absoluteValue, denominator)! }
+  public var absoluteValue: Self { Self.make(numerator.absoluteValue, denominator) }
   public var doubleValue: Double {
     guard !numerator.isZero else { return 0 }
     let numeratorApproximation = numerator.absoluteValue.binaryApproximation
@@ -49,52 +57,54 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
     isInteger ? numerator.description : "\(numerator)/\(denominator)"
   }
 
-  public static func < (lhs: Rational, rhs: Rational) -> Bool {
+  public static func < (lhs: Self, rhs: Self) -> Bool {
     lhs.numerator * rhs.denominator < rhs.numerator * lhs.denominator
   }
 
-  public static prefix func - (value: Rational) -> Rational {
-    Rational(-value.numerator, value.denominator)!
+  public static prefix func - (value: Self) -> Self {
+    Self.make(-value.numerator, value.denominator)
   }
 
-  public static func + (lhs: Rational, rhs: Rational) -> Rational {
-    Rational(
+  public static func + (lhs: Self, rhs: Self) -> Self {
+    Self.make(
       lhs.numerator * rhs.denominator + rhs.numerator * lhs.denominator,
       lhs.denominator * rhs.denominator
-    )!
+    )
   }
 
-  public static func - (lhs: Rational, rhs: Rational) -> Rational { lhs + -rhs }
+  public static func - (lhs: Self, rhs: Self) -> Self { lhs + -rhs }
 
-  public static func * (lhs: Rational, rhs: Rational) -> Rational {
-    Rational(lhs.numerator * rhs.numerator, lhs.denominator * rhs.denominator)!
+  public static func * (lhs: Self, rhs: Self) -> Self {
+    Self.make(lhs.numerator * rhs.numerator, lhs.denominator * rhs.denominator)
   }
 
-  public static func / (lhs: Rational, rhs: Rational) throws -> Rational {
+  public static func / (lhs: Self, rhs: Self) throws -> Self {
     guard !rhs.isZero else { throw BigIntError.divisionByZero }
-    return Rational(lhs.numerator * rhs.denominator, lhs.denominator * rhs.numerator)!
+    return Self.make(lhs.numerator * rhs.denominator, lhs.denominator * rhs.numerator)
   }
 
-  public func power(_ exponent: Int) throws -> Rational {
+  public func power(_ exponent: Int) throws -> Self {
     if exponent >= 0 {
-      return Rational(try numerator.power(exponent), try denominator.power(exponent))!
+      return Self.make(try numerator.power(exponent), try denominator.power(exponent))
     }
     guard !isZero else { throw BigIntError.divisionByZero }
     guard exponent != Int.min else { throw BigIntError.negativeExponent }
-    return Rational(try denominator.power(-exponent), try numerator.power(-exponent))!
+    return Self.make(try denominator.power(-exponent), try numerator.power(-exponent))
   }
 
-  public var exactSquareRoot: Rational? {
+  public var exactSquareRoot: Self? {
     guard signum >= 0, let numerator = numerator.exactSquareRoot,
       let denominator = denominator.exactSquareRoot
     else { return nil }
-    return Rational(numerator, denominator)
+    return Self(numerator, denominator)
   }
 
   public enum Rounding { case floor, ceiling, truncate, nearestEven }
 
   public func rounded(_ rule: Rounding) -> BigInt {
-    let division = try! numerator.quotientAndRemainder(dividingBy: denominator)
+    guard let division = try? numerator.quotientAndRemainder(dividingBy: denominator) else {
+      preconditionFailure("Rational invariant violated")
+    }
     let quotient = division.quotient
     let remainder = division.remainder
     guard !remainder.isZero else { return quotient }
@@ -112,16 +122,20 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
   }
 
   public static func exactDecimal(significand: BigInt, fractionalDigits: Int, exponent: Int)
-    -> Rational?
+    -> Self?
   {
     let scale = fractionalDigits - exponent
-    if scale <= 0 { return Rational(significand * (try! BigInt(10).power(-scale))) }
-    return Rational(significand, try! BigInt(10).power(scale))
+    if scale <= 0 {
+      guard scale != Int.min, let power = try? BigInt(10).power(-scale) else { return nil }
+      return Self(significand * power)
+    }
+    guard let power = try? BigInt(10).power(scale) else { return nil }
+    return Self(significand, power)
   }
 
-  public static func fromFiniteDouble(_ value: Double) -> Rational? {
+  public static func fromFiniteDouble(_ value: Double) -> Self? {
     guard value.isFinite else { return nil }
-    if value == 0 { return Rational(0) }
+    if value == 0 { return Self(0) }
     let bits = value.bitPattern
     let negative = bits >> 63 != 0
     let exponentBits = Int((bits >> 52) & 0x7ff)
@@ -135,15 +149,17 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
       significand = fraction | (UInt64(1) << 52)
       exponent = exponentBits - 1023 - 52
     }
-    var numerator = BigInt(String(significand))!
+    guard var numerator = BigInt(String(significand)) else { return nil }
     var denominator = BigInt.one
     if exponent >= 0 {
-      numerator = numerator * (try! BigInt(2).power(exponent))
+      guard let power = try? BigInt(2).power(exponent) else { return nil }
+      numerator *= power
     } else {
-      denominator = try! BigInt(2).power(-exponent)
+      guard let power = try? BigInt(2).power(-exponent) else { return nil }
+      denominator = power
     }
     if negative { numerator = -numerator }
-    return Rational(numerator, denominator)
+    return Self(numerator, denominator)
   }
 }
 
@@ -172,30 +188,30 @@ public enum RealComponent: Hashable, Sendable {
     }
   }
 
-  public static prefix func - (value: RealComponent) -> RealComponent {
+  public static prefix func - (value: Self) -> Self {
     switch value {
     case .exact(let x): .exact(-x)
     case .inexact(let x): .inexact(-x)
     }
   }
 
-  public static func + (lhs: RealComponent, rhs: RealComponent) -> RealComponent {
+  public static func + (lhs: Self, rhs: Self) -> Self {
     switch (lhs, rhs) {
     case (.exact(let a), .exact(let b)): .exact(a + b)
     default: .inexact(lhs.doubleValue + rhs.doubleValue)
     }
   }
 
-  public static func - (lhs: RealComponent, rhs: RealComponent) -> RealComponent { lhs + -rhs }
+  public static func - (lhs: Self, rhs: Self) -> Self { lhs + -rhs }
 
-  public static func * (lhs: RealComponent, rhs: RealComponent) -> RealComponent {
+  public static func * (lhs: Self, rhs: Self) -> Self {
     switch (lhs, rhs) {
     case (.exact(let a), .exact(let b)): .exact(a * b)
     default: .inexact(lhs.doubleValue * rhs.doubleValue)
     }
   }
 
-  public static func / (lhs: RealComponent, rhs: RealComponent) throws -> RealComponent {
+  public static func / (lhs: Self, rhs: Self) throws -> Self {
     guard !rhs.isZero else { throw BigIntError.divisionByZero }
     switch (lhs, rhs) {
     case (.exact(let a), .exact(let b)): return .exact(try a / b)
@@ -208,16 +224,15 @@ public enum SchemeNumber: Hashable, Sendable, CustomStringConvertible {
   case real(RealComponent)
   case complex(real: RealComponent, imaginary: RealComponent)
 
-  public static let zero = SchemeNumber.real(.exact(Rational(0)))
-  public static let one = SchemeNumber.real(.exact(Rational(1)))
+  public static let zero = Self.real(.exact(Rational(0)))
+  public static let one = Self.real(.exact(Rational(1)))
 
   public init(_ integer: Int64) { self = .real(.exact(Rational(integer))) }
-  public init(_ integer: BigInt) { self = .real(.exact(Rational(integer)!)) }
+  public init(_ integer: BigInt) { self = .real(.exact(Rational(integer) ?? .zero)) }
   public init(_ rational: Rational) { self = .real(.exact(rational)) }
   public init(_ inexact: Double) { self = .real(.inexact(inexact)) }
 
-  public static func rectangular(_ real: RealComponent, _ imaginary: RealComponent) -> SchemeNumber
-  {
+  public static func rectangular(_ real: RealComponent, _ imaginary: RealComponent) -> Self {
     guard imaginary.isZero else { return .complex(real: real, imaginary: imaginary) }
     if imaginary.isExact { return .real(real) }
     return real.isExact ? .real(.inexact(real.doubleValue)) : .real(real)
@@ -298,7 +313,7 @@ public enum SchemeNumber: Hashable, Sendable, CustomStringConvertible {
     }
   }
 
-  public static func numericallyEqual(_ lhs: SchemeNumber, _ rhs: SchemeNumber) -> Bool {
+  public static func numericallyEqual(_ lhs: Self, _ rhs: Self) -> Bool {
     let a = lhs.parts
     let b = rhs.parts
     return componentEqual(a.real, b.real) && componentEqual(a.imaginary, b.imaginary)
@@ -314,20 +329,20 @@ public enum SchemeNumber: Hashable, Sendable, CustomStringConvertible {
     }
   }
 
-  public static prefix func - (value: SchemeNumber) -> SchemeNumber {
+  public static prefix func - (value: Self) -> Self {
     let value = value.parts
     return rectangular(-value.real, -value.imaginary)
   }
 
-  public static func + (lhs: SchemeNumber, rhs: SchemeNumber) -> SchemeNumber {
+  public static func + (lhs: Self, rhs: Self) -> Self {
     let a = lhs.parts
     let b = rhs.parts
     return rectangular(a.real + b.real, a.imaginary + b.imaginary)
   }
 
-  public static func - (lhs: SchemeNumber, rhs: SchemeNumber) -> SchemeNumber { lhs + -rhs }
+  public static func - (lhs: Self, rhs: Self) -> Self { lhs + -rhs }
 
-  public static func * (lhs: SchemeNumber, rhs: SchemeNumber) -> SchemeNumber {
+  public static func * (lhs: Self, rhs: Self) -> Self {
     let a = lhs.parts
     let b = rhs.parts
     return rectangular(
@@ -336,7 +351,11 @@ public enum SchemeNumber: Hashable, Sendable, CustomStringConvertible {
     )
   }
 
-  public static func / (lhs: SchemeNumber, rhs: SchemeNumber) throws -> SchemeNumber {
+  public static func += (lhs: inout Self, rhs: Self) { lhs = lhs + rhs }
+  public static func -= (lhs: inout Self, rhs: Self) { lhs = lhs - rhs }
+  public static func *= (lhs: inout Self, rhs: Self) { lhs = lhs * rhs }
+
+  public static func / (lhs: Self, rhs: Self) throws -> Self {
     let a = lhs.parts
     let b = rhs.parts
     let denominator = b.real * b.real + b.imaginary * b.imaginary
@@ -367,7 +386,7 @@ public enum SchemeNumber: Hashable, Sendable, CustomStringConvertible {
     return angle == -.pi ? .pi : angle
   }
 
-  public func exactPower(_ exponent: Int) throws -> SchemeNumber {
+  public func exactPower(_ exponent: Int) throws -> Self {
     if exponent == 0 { return .one }
     if exponent < 0 {
       guard exponent != Int.min else { throw BigIntError.negativeExponent }
@@ -375,16 +394,16 @@ public enum SchemeNumber: Hashable, Sendable, CustomStringConvertible {
     }
     var exponent = exponent
     var factor = self
-    var result = SchemeNumber.one
+    var result = Self.one
     while exponent != 0 {
-      if exponent & 1 == 1 { result = result * factor }
+      if exponent & 1 == 1 { result *= factor }
       exponent >>= 1
-      if exponent != 0 { factor = factor * factor }
+      if exponent != 0 { factor *= factor }
     }
     return result
   }
 
-  public static func polar(magnitude: RealComponent, angle: RealComponent) -> SchemeNumber {
+  public static func polar(magnitude: RealComponent, angle: RealComponent) -> Self {
     if angle.isZero { return rectangular(magnitude, RealComponent(0)) }
     let radius = magnitude.doubleValue
     let theta = angle.doubleValue
@@ -394,7 +413,7 @@ public enum SchemeNumber: Hashable, Sendable, CustomStringConvertible {
     )
   }
 
-  public func inexact() -> SchemeNumber {
+  public func inexact() -> Self {
     let value = parts
     return Self.rectangular(.inexact(value.real.doubleValue), .inexact(value.imaginary.doubleValue))
   }

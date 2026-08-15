@@ -30,7 +30,7 @@ let r5rsReportProcedureNames: Set<String> = [
   "current-input-port", "current-output-port", "call-with-input-file", "call-with-output-file",
   "open-input-file", "open-output-file", "close-input-port", "close-output-port", "read",
   "read-char", "peek-char", "eof-object?", "char-ready?", "write", "display", "newline",
-  "write-char", "interaction-environment", "with-input-from-file", "with-output-to-file", "load"
+  "write-char", "interaction-environment", "with-input-from-file", "with-output-to-file", "load",
 ]
 
 extension Interpreter {

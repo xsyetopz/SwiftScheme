@@ -35,7 +35,8 @@ do {
       source = ""
     }
   } else {
-    let source = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
+    let data = FileHandle.standardInput.readDataToEndOfFile()
+    let source = String(data: data, encoding: .utf8) ?? ""
     _ = try interpreter.evaluate(source)
   }
 } catch {

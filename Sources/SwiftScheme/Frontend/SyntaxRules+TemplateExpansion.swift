@@ -18,7 +18,7 @@ extension SyntaxRules {
       let coreSyntax: Set<String> = [
         "quote", "if", "begin", "lambda", "define", "set!", "let", "let*", "letrec", "and", "or",
         "cond", "case", "do", "delay", "quasiquote", "unquote", "unquote-splicing", "let-syntax",
-        "letrec-syntax", "define-syntax", "syntax-rules", "else", "=>"
+        "letrec-syntax", "define-syntax", "syntax-rules", "else", "=>",
       ]
       if literals.contains(name) || name == keyword || coreSyntax.contains(name) {
         return .symbol(name)

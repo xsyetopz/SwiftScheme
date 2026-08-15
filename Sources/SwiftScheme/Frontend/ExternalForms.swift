@@ -188,7 +188,10 @@ package struct Reader {
     }
     let tokenColumn = column - 1
     var token = String(first)
-    while let character = current, !isDelimiter(character) { token.append(advance()!) }
+    while let character = current, !isDelimiter(character) {
+      guard let next = advance() else { break }
+      token.append(next)
+    }
     switch token.lowercased() {
     case "space": return .character(" ")
     case "newline": return .character("\n")
@@ -207,7 +210,10 @@ package struct Reader {
   private mutating func atom(starting first: Character) throws -> Value {
     let tokenColumn = column - 1
     var token = String(first)
-    while let character = current, !isDelimiter(character) { token.append(advance()!) }
+    while let character = current, !isDelimiter(character) {
+      guard let next = advance() else { break }
+      token.append(next)
+    }
     if token.contains(where: { "[]{}|".contains($0) }) {
       throw SchemeError.lexical(
         "reserved character in token \(token)",

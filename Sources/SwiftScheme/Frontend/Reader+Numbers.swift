@@ -51,7 +51,7 @@ extension Reader {
 
   func parseComplex(_ token: String, radix: Int, exactness: NumericExactness) -> SchemeNumber? {
     if let at = token.firstIndex(of: "@") {
-      guard token[token.index(after: at)...].firstIndex(of: "@") == nil,
+      guard !token[token.index(after: at)...].contains("@"),
         let magnitude = parseReal(String(token[..<at]), radix: radix, exactness: exactness),
         let angle = parseReal(
           String(token[token.index(after: at)...]),
@@ -71,9 +71,10 @@ extension Reader {
     let body = String(token.dropLast())
     guard !body.isEmpty else { return nil }
     if body == "+" || body == "-" {
+      guard let sign = body.first else { return nil }
       return .complex(
         real: .exact(Rational(0)),
-        imaginary: implicitImaginaryUnit(body.first!, exactness: exactness)
+        imaginary: implicitImaginaryUnit(sign, exactness: exactness)
       )
     }
 
@@ -150,7 +151,7 @@ extension Reader {
       guard let integer = parseUnsignedInteger(text, radix: radix) else { return nil }
       guard exactness != .exact || !integer.hasPlaceholder else { return nil }
       return exactness == .inexact || integer.hasPlaceholder
-        ? .inexact(integer.value.doubleValue) : .exact(Rational(integer.value)!)
+        ? .inexact(integer.value.doubleValue) : .exact(Rational(integer.value) ?? .zero)
     }
 
     return parseDecimalReal(text, exactness: exactness)
@@ -190,7 +191,7 @@ extension Reader {
       mantissa = String(characters[..<exponentIndex])
       exponentMarker = characters[exponentIndex]
       exponentText = String(characters[(exponentIndex + 1)...])
-      guard validExponent(exponentText!) else { return nil }
+      guard let exponentText, validExponent(exponentText) else { return nil }
     } else {
       mantissa = text
       exponentText = nil
@@ -210,7 +211,8 @@ extension Reader {
       return .exact(rational)
     }
     if !inexactSyntax, let integer = BigInt(normalized, radix: 10) {
-      return exactness == .inexact ? .inexact(integer.doubleValue) : .exact(Rational(integer)!)
+      return exactness == .inexact
+        ? .inexact(integer.doubleValue) : .exact(Rational(integer) ?? .zero)
     }
     let doubleText = normalized.replacingOccurrences(of: "s", with: "e").replacingOccurrences(
       of: "f",
@@ -299,14 +301,16 @@ extension Reader {
   func isDigit(_ character: Character, radix: Int) -> Bool {
     guard character.isASCII else { return false }
     switch character {
-    case "0"..."9": return Int(String(character))! < radix
+    case "0"..."9":
+      guard let value = Int(String(character)) else { return false }
+      return value < radix
     case "a"..."f": return radix == 16
     default: return false
     }
   }
 
   func exactDecimal(_ text: String) -> Rational? {
-    let exponentIndex = text.firstIndex(where: { "esfdl".contains($0) })
+    let exponentIndex = text.firstIndex { "esfdl".contains($0) }
     let mantissa = exponentIndex.map { String(text[..<$0]) } ?? text
     let exponent: Int
     if let exponentIndex {

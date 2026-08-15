@@ -12,7 +12,7 @@ extension Interpreter {
 
     func scheduleTransition(_ actions: [WindAction], _ target: Captured, _ delivered: [Value]) -> (
       Control, Continuation
-    )? {
+    ) {
       guard let first = actions.first else { return (.values(delivered), target.continuation) }
       let rest = Array(actions.dropFirst())
       switch first {
@@ -375,12 +375,12 @@ extension Interpreter {
         case .transitionFrame(let actions, let target, let delivered):
           // Dynamic-wind transition hooks are effect-only; discard all of
           // the values returned by each before/after procedure.
-          let scheduled = scheduleTransition(actions, target, delivered)!
+          let scheduled = scheduleTransition(actions, target, delivered)
           control = scheduled.0
           continuation = scheduled.1
         case .enteredFrame(let wind, let actions, let target, let delivered):
           winds.append(wind)
-          let scheduled = scheduleTransition(actions, target, delivered)!
+          let scheduled = scheduleTransition(actions, target, delivered)
           control = scheduled.0
           continuation = scheduled.1
         case .mapFrame(let procedure, let lists, let index, let results, let each, let next):
@@ -450,7 +450,7 @@ extension Interpreter {
           let common = zip(winds, target.winds).prefix { $0 === $1 }.count
           let exits = winds.dropFirst(common).reversed().map(WindAction.exit)
           let enters = target.winds.dropFirst(common).map(WindAction.enter)
-          let scheduled = scheduleTransition(exits + enters, target, arguments)!
+          let scheduled = scheduleTransition(exits + enters, target, arguments)
           control = scheduled.0
           continuation = scheduled.1
         case .special(let special):

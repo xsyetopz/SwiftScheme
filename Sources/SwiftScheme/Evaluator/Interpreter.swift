@@ -24,7 +24,7 @@ public final class Interpreter {
     self.global = heap.withActive { SchemeEnvironment() }
     self.report = heap.withActive { SchemeEnvironment() }
     currentInput = SchemePort(input: "")
-    currentOutput = SchemePort(sink: { output($0) })
+    currentOutput = SchemePort { output($0) }
     heap.withActive {
       installPrimitives(in: report)
       for (name, cell) in report.values { global.define(name, cell.value) }

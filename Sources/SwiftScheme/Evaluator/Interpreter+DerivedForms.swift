@@ -259,7 +259,7 @@ extension Interpreter {
         makeList(
           [internalSyntax("lambda"), makeList(entries.map { .symbol($0.0) })]
             + Array(form.dropFirst(2))
-        )
+        ),
       ] + entries.map(\.1)
     )
   }
@@ -294,7 +294,7 @@ extension Interpreter {
     let temp = internalTemporary("or#\(macroSerial)")
     return makeList([
       internalSyntax("let"), makeList([makeList([temp, first])]),
-      makeList([internalSyntax("if"), temp, temp, expandOr(Array(expressions.dropFirst()))])
+      makeList([internalSyntax("if"), temp, temp, expandOr(Array(expressions.dropFirst()))]),
     ])
   }
 
@@ -316,7 +316,7 @@ extension Interpreter {
       let temp = internalTemporary("cond#\(macroSerial)")
       return makeList([
         internalSyntax("let"), makeList([makeList([temp, clause[0]])]),
-        makeList([internalSyntax("if"), temp, temp, rest])
+        makeList([internalSyntax("if"), temp, temp, rest]),
       ])
     }
     let arrowKeyword =
@@ -327,12 +327,12 @@ extension Interpreter {
       let temp = internalTemporary("cond#\(macroSerial)")
       return makeList([
         internalSyntax("let"), makeList([makeList([temp, clause[0]])]),
-        makeList([internalSyntax("if"), temp, makeList([clause[2], temp]), rest])
+        makeList([internalSyntax("if"), temp, makeList([clause[2], temp]), rest]),
       ])
     }
     return makeList([
       internalSyntax("if"), clause[0],
-      makeList([internalSyntax("begin")] + Array(clause.dropFirst())), rest
+      makeList([internalSyntax("begin")] + Array(clause.dropFirst())), rest,
     ])
   }
 
@@ -363,7 +363,7 @@ extension Interpreter {
       return makeList([
         internalSyntax("if"), expandOr(tests),
         makeList([internalSyntax("begin")] + Array(clause.dropFirst())),
-        try clauses(remaining.dropFirst())
+        try clauses(remaining.dropFirst()),
       ])
     }
     return makeList([
@@ -391,11 +391,11 @@ extension Interpreter {
     let recur = makeList([loop] + steps)
     let body = makeList([
       internalSyntax("if"), test[0], done,
-      makeList([internalSyntax("begin")] + Array(form.dropFirst(3)) + [recur])
+      makeList([internalSyntax("begin")] + Array(form.dropFirst(3)) + [recur]),
     ])
     return makeList([
       internalSyntax("let"), loop,
-      makeList(zip(names, specs).map { makeList([.symbol($0.0), $0.1[1]]) }), body
+      makeList(zip(names, specs).map { makeList([.symbol($0.0), $0.1[1]]) }), body,
     ])
   }
 
@@ -449,7 +449,7 @@ extension Interpreter {
       "cons",
       [
         try expandQuasiquote(head, depth: depth, environment),
-        try expandQuasiquote(pair.cdr, depth: depth, environment)
+        try expandQuasiquote(pair.cdr, depth: depth, environment),
       ]
     )
   }
