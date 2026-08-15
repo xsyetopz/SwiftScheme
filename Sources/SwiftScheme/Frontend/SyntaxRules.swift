@@ -4,6 +4,11 @@ import SwiftSchemeRuntime
 
 package let internalSyntaxPrefix = internalSymbolPrefix + "syntax:"
 package let internalTemporaryPrefix = internalSymbolPrefix + "temp:"
+package let syntaxKeywords: Set<String> = [
+  "quote", "if", "begin", "lambda", "define", "set!", "let", "let*", "letrec", "and", "or", "cond",
+  "case", "do", "delay", "quasiquote", "unquote", "unquote-splicing", "let-syntax", "letrec-syntax",
+  "define-syntax", "syntax-rules", "else", "=>",
+]
 
 package func internalSyntax(_ name: String) -> Value { .symbol(internalSyntaxPrefix + name) }
 
@@ -24,7 +29,7 @@ package func markLiteral(_ value: Value, _ seen: inout Set<ObjectIdentifier>) {
   case .vector(let vector):
     guard seen.insert(ObjectIdentifier(vector)).inserted else { return }
     vector.isLiteral = true
-    vector.elements.forEach { markLiteral($0, &seen) }
+    for element in vector.elements { markLiteral(element, &seen) }
   case .string(let string): string.isLiteral = true
   default: break
   }
@@ -72,21 +77,28 @@ package final class SyntaxRules: SchemeMacro {
   let literals: Set<String>
   var rules: [(Value, Value)]
   var definition: SchemeEnvironment?
-  let ellipsis: String?
+  let ellipsis: String
   var literalBindings: [String: LiteralBinding] = [:]
+  var coreBindings: [String: LiteralBinding] = [:]
   var aliases: [String: String] = [:]
   var introduced: [String: String] = [:]
 
   package init(keyword: String, spec: Value, definition: SchemeEnvironment) throws {
     let form = try array(from: spec, context: "syntax-rules")
-    guard form.count >= 3, case .symbol("syntax-rules") = form[0] else {
+    guard form.count >= 2, case .symbol("syntax-rules") = form[0] else {
       throw SchemeError.syntax("transformer must be syntax-rules")
     }
     self.keyword = keyword
-    self.ellipsis = "..."
-    guard form.count >= 2 else { throw SchemeError.syntax("syntax-rules requires a literals list") }
+    let literalIndex: Int
+    if form.count >= 3, case .symbol = form[1] {
+      self.ellipsis = try identifier(form[1], "syntax-rules ellipsis")
+      literalIndex = 2
+    } else {
+      self.ellipsis = "..."
+      literalIndex = 1
+    }
     let literalValues: [Value]
-    do { literalValues = try array(from: form[1], context: "syntax-rules literals") } catch {
+    do { literalValues = try array(from: form[literalIndex], context: "syntax-rules literals") } catch {
       throw SchemeError.syntax("syntax-rules literals must be a proper list")
     }
     let literalNames = try literalValues.map { try identifier($0, "syntax-rules literal") }
@@ -94,7 +106,7 @@ package final class SyntaxRules: SchemeMacro {
       throw SchemeError.syntax("ellipsis cannot be a syntax-rules literal")
     }
     self.literals = Set(literalNames)
-    self.rules = try form.dropFirst(2).map {
+    self.rules = try form.dropFirst(literalIndex + 1).map {
       let rule = try array(from: $0, context: "syntax rule")
       guard rule.count == 2 else {
         throw SchemeError.syntax("syntax rule requires pattern and template")
@@ -106,11 +118,20 @@ package final class SyntaxRules: SchemeMacro {
       try validatePattern(pattern, into: &patternVariables)
     }
     self.definition = definition
+    for name in syntaxKeywords {
+      if let macro = definition.macro(name) {
+        coreBindings[name] = .macro(macro)
+      } else if let cell = definition.cell(name) {
+        coreBindings[name] = .cell(cell)
+      } else {
+        coreBindings[name] = .unbound
+      }
+    }
     for name in literals {
-      if let cell = definition.cell(name) {
-        literalBindings[name] = .cell(cell)
-      } else if let macro = definition.macro(name) {
+      if let macro = definition.macro(name) {
         literalBindings[name] = .macro(macro)
+      } else if let cell = definition.cell(name) {
+        literalBindings[name] = .cell(cell)
       } else {
         literalBindings[name] = .unbound
       }
@@ -140,14 +161,15 @@ package final class SyntaxRules: SchemeMacro {
     definition = nil
     rules.removeAll()
     literalBindings.removeAll()
+    coreBindings.removeAll()
     aliases.removeAll()
     introduced.removeAll()
   }
 
   private func validatePattern(_ pattern: Value, into variables: inout Set<String>) throws {
-    guard case .pair = pattern else {
-      throw SchemeError.syntax("syntax-rules pattern requires a keyword")
-    }
+    guard case .pair(let pair) = pattern, case .symbol(let name) = pair.car,
+      name == keyword || name == "_"
+    else { throw SchemeError.syntax("syntax-rules pattern keyword does not match macro") }
     try validatePatternSequence(pattern, head: true, into: &variables)
   }
 
@@ -166,7 +188,7 @@ package final class SyntaxRules: SchemeMacro {
         }
         try walkPattern(pair.car, head: true, into: &variables)
       } else if isEllipsis(pair.car) {
-        guard previousWasPattern, case .empty = pair.cdr else {
+        guard previousWasPattern else {
           throw SchemeError.syntax("ellipsis must terminate a nonempty pattern sequence")
         }
         previousWasPattern = false
@@ -192,9 +214,7 @@ package final class SyntaxRules: SchemeMacro {
   private func walkPattern(_ value: Value, head: Bool, into variables: inout Set<String>) throws {
     switch value {
     case .symbol(let name):
-      guard !head, name != "_", !literals.contains(name), name != keyword, !isEllipsis(value) else {
-        return
-      }
+      guard !head, !literals.contains(name), name != keyword, !isEllipsis(value) else { return }
       guard variables.insert(name).inserted else {
         throw SchemeError.syntax("duplicate syntax-rules pattern variable \(name)")
       }
@@ -222,11 +242,7 @@ package final class SyntaxRules: SchemeMacro {
   }
 
   private func freeIdentifiers() -> Set<String> {
-    let core: Set<String> = [
-      "quote", "if", "begin", "lambda", "define", "set!", "let", "let*", "letrec", "and", "or",
-      "cond", "case", "do", "delay", "quasiquote", "unquote", "unquote-splicing", "let-syntax",
-      "letrec-syntax", "define-syntax", "syntax-rules", "else", "=>",
-    ]
+    let core = syntaxKeywords
     var result = Set<String>()
     for (pattern, template) in rules {
       var variables = Set<String>()
@@ -236,16 +252,15 @@ package final class SyntaxRules: SchemeMacro {
       }
       variables.subtract(literals)
       variables.remove(keyword)
-      variables.remove("_")
-      variables.remove("...")
+      variables.remove(ellipsis)
       variables.remove("else")
       variables.remove("=>")
       var symbols = Set<String>()
       collectSymbols(template, into: &symbols)
       result.formUnion(
-        symbols.subtracting(variables).subtracting(literals).subtracting(core).subtracting([
-          "...", keyword
-        ])
+        symbols.subtracting(variables).subtracting(literals).subtracting(core).subtracting(
+          Set([ellipsis, keyword])
+        )
       )
     }
     return result
@@ -273,7 +288,7 @@ package final class SyntaxRules: SchemeMacro {
     }
     for (pattern, template) in rules {
       var captures: [String: Capture] = [:]
-      if match(pattern, matchedUse, path: [], useEnvironment, into: &captures) {
+      if match(pattern, matchedUse, path: [], useEnvironment, into: &captures, head: true) {
         aliases.removeAll()
         introduced.removeAll()
         return try transcribe(template, captures, path: [], serial: &serial)

@@ -1,3 +1,6 @@
 import Foundation
 
-extension Value: CustomStringConvertible { public var description: String { written } }
+extension Value: CustomStringConvertible {
+  /// Returns the same external representation as `written`.
+  public var description: String { written }
+}

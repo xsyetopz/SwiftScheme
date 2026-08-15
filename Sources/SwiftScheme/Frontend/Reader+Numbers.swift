@@ -133,8 +133,15 @@ extension Reader {
       default: break
       }
     }
-    let slashParts = text.split(separator: "/", omittingEmptySubsequences: false)
-    if text.contains("/") {
+    // `number->string` marks non-decimal inexact rationals with a trailing
+    // `#`.  Here it is an inexactness marker, not an unspecified digit:
+    // preserving the exact ratio is required for binary64 round-trips.
+    let generatedCandidate = text.hasSuffix("#") ? String(text.dropLast()) : text
+    let generatedInexact = text.hasSuffix("#") && generatedCandidate.contains("/")
+      && !generatedCandidate.split(separator: "/").contains { $0.contains("#") }
+    let numericText = generatedInexact ? generatedCandidate : text
+    let slashParts = numericText.split(separator: "/", omittingEmptySubsequences: false)
+    if numericText.contains("/") {
       guard slashParts.count == 2,
         let numerator = parseUnsignedInteger(String(slashParts[0]), radix: radix),
         let denominator = parseUnsignedInteger(String(slashParts[1]), radix: radix),
@@ -143,7 +150,7 @@ extension Reader {
       guard exactness != .exact || (!numerator.hasPlaceholder && !denominator.hasPlaceholder) else {
         return nil
       }
-      let inexact = exactness == .inexact || numerator.hasPlaceholder || denominator.hasPlaceholder
+      let inexact = generatedInexact || exactness == .inexact || numerator.hasPlaceholder || denominator.hasPlaceholder
       return inexact ? .inexact(rational.doubleValue) : .exact(rational)
     }
 

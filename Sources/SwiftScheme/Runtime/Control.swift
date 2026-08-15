@@ -4,6 +4,7 @@ package final class Wind: SchemeHeapNode {
   package let id: Int
   package var before: Value
   package var after: Value
+  package var cleanup: (() -> Void)?
   package init(_ id: Int, _ before: Value, _ after: Value) {
     self.id = id
     self.before = before
@@ -14,9 +15,14 @@ package final class Wind: SchemeHeapNode {
     traceValue(before, visit)
     traceValue(after, visit)
   }
+  package func unwind() {
+    cleanup?()
+    cleanup = nil
+  }
   package func breakSchemeCycles() {
     before = .undefined
     after = .undefined
+    cleanup = nil
   }
 }
 
@@ -38,6 +44,7 @@ package indirect enum Continuation {
   case halt
   case ifFrame(Value, Value, SchemeEnvironment, Self)
   case beginFrame([Value], SchemeEnvironment, Bool, Self)
+  case loadFrame(String, Int, SchemeEnvironment, Self)
   case expressionContext(Self)
   case discardFrame(Self)
   case setFrame(String, SchemeEnvironment, Self)
@@ -84,7 +91,7 @@ package func containsSchemeNode(_ value: Value) -> Bool {
 }
 
 package func traceValues(_ values: [Value], _ visit: (any SchemeHeapNode) -> Void) {
-  values.forEach { traceValue($0, visit) }
+  for value in values { traceValue(value, visit) }
 }
 
 package func traceContinuation(_ continuation: Continuation, _ visit: (any SchemeHeapNode) -> Void)
@@ -98,6 +105,9 @@ package func traceContinuation(_ continuation: Continuation, _ visit: (any Schem
     traceContinuation(next, visit)
   case .beginFrame(let values, let environment, _, let next):
     traceValues(values, visit)
+    visit(environment)
+    traceContinuation(next, visit)
+  case .loadFrame(_, _, let environment, let next):
     visit(environment)
     traceContinuation(next, visit)
   case .expressionContext(let next): traceContinuation(next, visit)
@@ -116,7 +126,7 @@ package func traceContinuation(_ continuation: Continuation, _ visit: (any Schem
     visit(environment)
     traceContinuation(next, visit)
   case .letrecFrame(let bindings, _, let environment, let values, let bodyEnvironment, let next):
-    bindings.forEach { traceValue($0.1, visit) }
+    for binding in bindings { traceValue(binding.1, visit) }
     visit(environment)
     traceValues(values, visit)
     visit(bodyEnvironment)
@@ -141,7 +151,7 @@ package func traceContinuation(_ continuation: Continuation, _ visit: (any Schem
     traceContinuation(next, visit)
   case .transitionFrame(let actions, let captured, let values),
     .enteredFrame(_, let actions, let captured, let values):
-    actions.forEach { action in
+    for action in actions {
       switch action {
       case .exit(let wind), .enter(let wind): visit(wind)
       }
@@ -151,7 +161,7 @@ package func traceContinuation(_ continuation: Continuation, _ visit: (any Schem
     traceValues(values, visit)
   case .mapFrame(let value, let lists, _, let values, _, let next):
     traceValue(value, visit)
-    lists.forEach { traceValues($0, visit) }
+    for list in lists { traceValues(list, visit) }
     traceValues(values, visit)
     traceContinuation(next, visit)
   case .closePortFrame(_, let next), .restoreInputFrame(_, _, let next),

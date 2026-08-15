@@ -85,22 +85,27 @@ public final class SchemePort {
   package var output = ""
   package var handle: FileHandle?
   package var closed = false
+  package var defaultInputReady = false
 
-  package init(input: String) {
+  package init(input: String, defaultReady: Bool = false) {
     mode = .input
     self.input = scalarCharacters(input)
+    self.defaultInputReady = defaultReady
   }
   package init(output: Bool) { mode = .output }
   package init(sink: @escaping (String) throws -> Void) {
     mode = .output
     self.sink = sink
   }
-  package init(handle: FileHandle, mode: Mode) {
+  package init(handle: FileHandle, mode: Mode) throws {
     self.mode = mode
     self.handle = handle
     if mode == .input {
       let data = handle.readDataToEndOfFile()
-      input = scalarCharacters(String(data: data, encoding: .utf8) ?? "")
+      guard let text = String(data: data, encoding: .utf8) else {
+        throw SchemeError.io("invalid UTF-8 input")
+      }
+      input = scalarCharacters(text)
     } else {
       sink = { text in
         do { try handle.write(contentsOf: Data(text.utf8)) } catch {
@@ -295,7 +300,7 @@ public indirect enum Value {
     switch self {
     case .string(let value): value.string
     case .character(let value): String(value)
-    default: written
+    default: Writer.display(self)
     }
   }
 }

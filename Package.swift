@@ -8,6 +8,7 @@ let package = Package(
     .library(name: "SwiftScheme", targets: ["SwiftScheme"]),
     .executable(name: "swiftscheme", targets: ["SwiftSchemeCLI"]),
   ],
+  dependencies: [.package(url: "https://github.com/apple/swift-testing.git", from: "0.13.0")],
   targets: [
     .target(name: "SwiftSchemeNumeric", path: "Sources/SwiftScheme/Numeric"),
     .target(
@@ -28,7 +29,7 @@ let package = Package(
     .target(
       name: "SwiftSchemeEvaluator",
       dependencies: [
-        "SwiftSchemeFrontend", "SwiftSchemeNumeric", "SwiftSchemePrimitives", "SwiftSchemeRuntime"
+        "SwiftSchemeFrontend", "SwiftSchemeNumeric", "SwiftSchemePrimitives", "SwiftSchemeRuntime",
       ],
       path: "Sources/SwiftScheme/Evaluator"
     ),
@@ -44,7 +45,7 @@ let package = Package(
     ),
     .testTarget(
       name: "SwiftSchemeTests",
-      dependencies: ["SwiftScheme"],
+      dependencies: ["SwiftScheme", .product(name: "Testing", package: "swift-testing")],
       path: "Tests/SwiftSchemeTests"
     ),
   ],

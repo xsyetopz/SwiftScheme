@@ -60,24 +60,6 @@ extension Interpreter {
     return expanded
   }
 
-  func validateBody(_ body: [Value], context: String, in environment: SchemeEnvironment) throws {
-    let expanded = try expandedBody(body, in: environment)
-    var sawExpression = false
-    for form in expanded {
-      if isDefinitionForm(form, "define", in: environment)
-        || isDefinitionForm(form, "define-syntax", in: environment)
-      {
-        if sawExpression { throw SchemeError.syntax("definition after expression in \(context)") }
-        if isDefinitionForm(form, "define-syntax", in: environment) {
-          throw SchemeError.syntax("define-syntax is only valid at top level")
-        }
-      } else {
-        sawExpression = true
-      }
-    }
-    guard sawExpression else { throw SchemeError.syntax("\(context) requires an expression") }
-  }
-
   func prepareInternalDefinitions(_ body: [Value], in environment: SchemeEnvironment) throws {
     var names = Set<String>()
     let raw = try leadingBodyForms(body, in: environment)
@@ -169,6 +151,7 @@ extension Interpreter {
     switch continuation {
     case .halt: return true
     case .beginFrame(_, _, let allowed, _): return allowed
+    case .loadFrame: return true
     default: return false
     }
   }
@@ -249,19 +232,15 @@ extension Interpreter {
       )
       let binding = makeList([.symbol(name), lambda])
       return makeList([
-        internalSyntax("letrec"), makeList([binding]), makeList([.symbol(name)] + entries.map(\.1))
+        internalSyntax("letrec"), makeList([binding]), makeList([.symbol(name)] + entries.map(\.1)),
       ])
     }
     let entries = try bindings(form[1], "let")
     try ensureDistinct(entries, "let")
-    return makeList(
-      [
-        makeList(
-          [internalSyntax("lambda"), makeList(entries.map { .symbol($0.0) })]
-            + Array(form.dropFirst(2))
-        ),
-      ] + entries.map(\.1)
+    let lambda = makeList(
+      [internalSyntax("lambda"), makeList(entries.map { .symbol($0.0) })] + Array(form.dropFirst(2))
     )
+    return makeList([lambda] + entries.map(\.1))
   }
 
   func expandLetStar(_ form: [Value]) throws -> Value {
@@ -273,7 +252,7 @@ extension Interpreter {
     var result = makeList([internalSyntax("begin")] + Array(form.dropFirst(2)))
     for entry in entries.reversed() {
       result = makeList([
-        internalSyntax("let"), makeList([makeList([.symbol(entry.0), entry.1])]), result
+        internalSyntax("let"), makeList([makeList([.symbol(entry.0), entry.1])]), result,
       ])
     }
     return result
@@ -283,7 +262,7 @@ extension Interpreter {
     guard let first = expressions.first else { return .boolean(true) }
     if expressions.count == 1 { return first }
     return makeList([
-      internalSyntax("if"), first, expandAnd(Array(expressions.dropFirst())), .boolean(false)
+      internalSyntax("if"), first, expandAnd(Array(expressions.dropFirst())), .boolean(false),
     ])
   }
 
@@ -303,15 +282,22 @@ extension Interpreter {
     let clause = try array(from: first, context: "cond clause")
     guard !clause.isEmpty else { throw SchemeError.syntax("empty cond clause") }
     let elseKeyword =
-      environment.cell("else") == nil && environment.macro("else") == nil
-      && isSymbol(clause[0], "else")
+      internalSyntaxName(clause[0]) == "else"
+      || (environment.cell("else") == nil && environment.macro("else") == nil
+        && isSymbol(clause[0], "else"))
     if elseKeyword {
       guard clauses.count == 1 else { throw SchemeError.syntax("cond else must be last") }
       guard clause.count >= 2 else { throw SchemeError.syntax("cond else requires a body") }
+      try validateExpressionSequence(
+        Array(clause.dropFirst()),
+        context: "cond clause",
+        in: environment
+      )
       return makeList([internalSyntax("begin")] + Array(clause.dropFirst()))
     }
     let rest = try expandCond(Array(clauses.dropFirst()), environment)
     if clause.count == 1 {
+      try validateExpressionSequence([clause[0]], context: "cond test", in: environment)
       macroSerial += 1
       let temp = internalTemporary("cond#\(macroSerial)")
       return makeList([
@@ -320,9 +306,13 @@ extension Interpreter {
       ])
     }
     let arrowKeyword =
-      environment.cell("=>") == nil && environment.macro("=>") == nil && clause.count == 3
-      && isSymbol(clause[1], "=>")
+      clause.count == 3
+      && (internalSyntaxName(clause[1]) == "=>"
+        || (environment.cell("=>") == nil && environment.macro("=>") == nil
+          && isSymbol(clause[1], "=>")))
     if arrowKeyword {
+      try validateExpressionSequence([clause[0]], context: "cond test", in: environment)
+      try validateExpressionSequence([clause[2]], context: "cond recipient", in: environment)
       macroSerial += 1
       let temp = internalTemporary("cond#\(macroSerial)")
       return makeList([
@@ -330,6 +320,12 @@ extension Interpreter {
         makeList([internalSyntax("if"), temp, makeList([clause[2], temp]), rest]),
       ])
     }
+    try validateExpressionSequence([clause[0]], context: "cond test", in: environment)
+    try validateExpressionSequence(
+      Array(clause.dropFirst()),
+      context: "cond clause",
+      in: environment
+    )
     return makeList([
       internalSyntax("if"), clause[0],
       makeList([internalSyntax("begin")] + Array(clause.dropFirst())), rest,
@@ -337,28 +333,32 @@ extension Interpreter {
   }
 
   func expandCase(_ form: [Value], _ environment: SchemeEnvironment) throws -> Value {
-    guard form.count >= 2 else { throw SchemeError.syntax("case requires a key") }
+    guard form.count >= 3 else { throw SchemeError.syntax("case requires a key and clause") }
     macroSerial += 1
     let key = internalTemporary("case#\(macroSerial)")
-    var seenDatums: [Value] = []
     func clauses(_ remaining: ArraySlice<Value>) throws -> Value {
       guard let first = remaining.first else { return .unspecified }
       let clause = try array(from: first, context: "case clause")
       guard clause.count >= 2 else { throw SchemeError.syntax("invalid case clause") }
-      if isSymbol(clause[0], "else") && environment.cell("else") == nil
-        && environment.macro("else") == nil
+      if internalSyntaxName(clause[0]) == "else"
+        || (isSymbol(clause[0], "else") && environment.cell("else") == nil
+          && environment.macro("else") == nil)
       {
         guard remaining.count == 1 else { throw SchemeError.syntax("case else must be last") }
         guard clause.count >= 2 else { throw SchemeError.syntax("case else requires a body") }
+        try validateExpressionSequence(
+          Array(clause.dropFirst()),
+          context: "case clause",
+          in: environment
+        )
         return makeList([internalSyntax("begin")] + Array(clause.dropFirst()))
       }
       let datums = try array(from: clause[0], context: "case datums")
-      for datum in datums {
-        guard !seenDatums.contains(where: { eqv($0, datum) }) else {
-          throw SchemeError.syntax("duplicate case datum")
-        }
-        seenDatums.append(datum)
-      }
+      try validateExpressionSequence(
+        Array(clause.dropFirst()),
+        context: "case clause",
+        in: environment
+      )
       let tests = datums.map { coreCall("eqv?", [key, quoted($0)]) }
       return makeList([
         internalSyntax("if"), expandOr(tests),
@@ -367,11 +367,11 @@ extension Interpreter {
       ])
     }
     return makeList([
-      internalSyntax("let"), makeList([makeList([key, form[1]])]), try clauses(form.dropFirst(2))
+      internalSyntax("let"), makeList([makeList([key, form[1]])]), try clauses(form.dropFirst(2)),
     ])
   }
 
-  func expandDo(_ form: [Value]) throws -> Value {
+  func expandDo(_ form: [Value], _ environment: SchemeEnvironment) throws -> Value {
     guard form.count >= 3 else { throw SchemeError.syntax("do requires bindings and test") }
     let specs = try array(from: form[1], context: "do bindings").map {
       try array(from: $0, context: "do binding")
@@ -381,13 +381,23 @@ extension Interpreter {
     }
     let test = try array(from: form[2], context: "do test")
     guard !test.isEmpty else { throw SchemeError.syntax("empty do test") }
+    try validateExpressionSequence([test[0]], context: "do test", in: environment)
+    let results = Array(test.dropFirst())
+    if !results.isEmpty {
+      try validateExpressionSequence(results, context: "do result", in: environment)
+    }
+    try validateExpressionSequence(
+      Array(form.dropFirst(3)),
+      context: "do command",
+      in: environment,
+      requireOne: false
+    )
     macroSerial += 1
     let loop = internalTemporary("do#\(macroSerial)")
     let names = try specs.map { try identifier($0[0], "do") }
     guard Set(names).count == names.count else { throw SchemeError.syntax("duplicate do variable") }
     let steps = zip(specs, names).map { $0.0.count == 3 ? $0.0[2] : .symbol($0.1) }
-    let done =
-      test.count == 1 ? .unspecified : makeList([internalSyntax("begin")] + Array(test.dropFirst()))
+    let done = test.count == 1 ? .unspecified : makeList([internalSyntax("begin")] + results)
     let recur = makeList([loop] + steps)
     let body = makeList([
       internalSyntax("if"), test[0], done,
@@ -400,58 +410,4 @@ extension Interpreter {
   }
 
   func quoted(_ value: Value) -> Value { makeList([internalSyntax("quote"), value]) }
-
-  func expandQuasiquote(_ value: Value, depth: Int, _ environment: SchemeEnvironment) throws
-    -> Value
-  {
-    if let form = try? array(from: value), form.count == 2, case .symbol(let name) = form[0] {
-      let active = environment.cell(name) == nil && environment.macro(name) == nil
-      if name == "unquote" && active {
-        return depth == 1
-          ? form[1]
-          : coreCall(
-            "list",
-            [quoted(.symbol(name)), try expandQuasiquote(form[1], depth: depth - 1, environment)]
-          )
-      }
-      if name == "unquote-splicing" && active {
-        guard depth > 1 else { throw SchemeError.syntax("unquote-splicing outside list context") }
-        return coreCall(
-          "list",
-          [quoted(.symbol(name)), try expandQuasiquote(form[1], depth: depth - 1, environment)]
-        )
-      }
-      if name == "quasiquote" && active {
-        return coreCall(
-          "list",
-          [quoted(.symbol(name)), try expandQuasiquote(form[1], depth: depth + 1, environment)]
-        )
-      }
-    }
-    if case .vector(let vector) = value {
-      return coreCall(
-        "list->vector",
-        [try expandQuasiquote(makeList(vector.elements), depth: depth, environment)]
-      )
-    }
-    guard case .pair(let pair) = value else { return quoted(value) }
-    let head = pair.car
-    if let form = try? array(from: head), form.count == 2,
-      case .symbol("unquote-splicing") = form[0], depth == 1,
-      environment.cell("unquote-splicing") == nil && environment.macro("unquote-splicing") == nil
-    {
-      return coreCall(
-        "append",
-        [form[1], try expandQuasiquote(pair.cdr, depth: depth, environment)]
-      )
-    }
-    return coreCall(
-      "cons",
-      [
-        try expandQuasiquote(head, depth: depth, environment),
-        try expandQuasiquote(pair.cdr, depth: depth, environment),
-      ]
-    )
-  }
-
 }

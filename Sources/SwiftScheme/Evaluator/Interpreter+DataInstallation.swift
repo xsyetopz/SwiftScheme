@@ -38,7 +38,8 @@ extension Interpreter {
       return .integer(BigInt(try array(from: $0[0]).count))
     }
     primitive("append", in: env) { args in
-      var result = args.last ?? .empty
+      guard !args.isEmpty else { throw SchemeError.arity("append expects at least 1 argument") }
+      var result = args[args.count - 1]
       for list in args.dropLast().reversed() {
         result = makeList(try array(from: list, context: "append"), tail: result)
       }
@@ -181,7 +182,7 @@ extension Interpreter {
     primitive("symbol->string", in: env) { args in
       try require(args, 1, "symbol->string")
       guard case .symbol(let s) = args[0] else { throw SchemeError.type("expected symbol") }
-      let string = SchemeString(symbolSpelling(s))
+      let string = SchemeString(env.spelling(s) ?? symbolSpelling(s))
       string.isLiteral = true
       return .string(string)
     }
@@ -206,9 +207,7 @@ extension Interpreter {
       "char-ci<=?", "char-ci>=?",
     ] {
       primitive(name, in: env) { args in
-        guard args.count >= 2 else {
-          throw SchemeError.arity("\(name) expects at least 2 arguments")
-        }
+        guard args.count == 2 else { throw SchemeError.arity("\(name) expects 2 arguments") }
         let characters = try args.map { try character($0, name) }
         let chars: [String] =
           name.contains("-ci") ? characters.map(scalarCaseKey) : characters.map(String.init)
@@ -216,17 +215,17 @@ extension Interpreter {
       }
     }
     primitive("char-alphabetic?", in: env) {
-      try charPredicate($0, "char-alphabetic?", isScalarCaseCharacter)
+      try charPredicate($0, "char-alphabetic?", isCaseStableAlphabetic)
     }
     primitive("char-numeric?", in: env) { try charPredicate($0, "char-numeric?") { $0.isNumber } }
     primitive("char-whitespace?", in: env) {
       try charPredicate($0, "char-whitespace?") { $0.isWhitespace }
     }
     primitive("char-upper-case?", in: env) {
-      try charPredicate($0, "char-upper-case?") { isScalarCaseCharacter($0) && $0.isUppercase }
+      try charPredicate($0, "char-upper-case?") { $0.isUppercase }
     }
     primitive("char-lower-case?", in: env) {
-      try charPredicate($0, "char-lower-case?") { isScalarCaseCharacter($0) && $0.isLowercase }
+      try charPredicate($0, "char-lower-case?") { $0.isLowercase }
     }
     primitive("char-upcase", in: env) {
       try require($0, 1, "char-upcase")
@@ -237,8 +236,61 @@ extension Interpreter {
       return .character(scalarCaseMap(try character($0[0], "char-downcase"), upper: false))
     }
 
-    primitive("string", in: env) {
-      .string(SchemeString(characters: try $0.map { try character($0, "string") }))
+    for name in ["char=?", "char<?", "char>?", "char<=?", "char>=?", "char-ci=?", "char-ci<?", "char-ci>?", "char-ci<=?", "char-ci>=?"] {
+      primitive(name, in: env) { args in
+        guard args.count == 2 else { throw SchemeError.arity("\(name) expects 2 arguments") }
+        let chars = try args.map { try character($0, name) }
+        if name.hasPrefix("char-ci") {
+          let values = chars.map { scalarCaseKey($0) }
+          for pair in zip(values, values.dropFirst()) {
+            let ordering = scalarStringOrdering(pair.0, pair.1)
+            let ok = name.hasSuffix("=?") ? ordering == 0 : name.hasSuffix("<?") ? ordering < 0 : name.hasSuffix(">?") ? ordering > 0 : name.hasSuffix("<=?") ? ordering <= 0 : ordering >= 0
+            if !ok { return .boolean(false) }
+          }
+          return .boolean(true)
+        }
+        let values = chars.map(String.init)
+        for pair in zip(values, values.dropFirst()) {
+          let ok: Bool
+          switch name {
+          case "char=?": ok = pair.0 == pair.1
+          case "char<?": ok = pair.0 < pair.1
+          case "char>?": ok = pair.0 > pair.1
+          case "char<=?": ok = pair.0 <= pair.1
+          default: ok = pair.0 >= pair.1
+          }
+          if !ok { return .boolean(false) }
+        }
+        return .boolean(true)
+      }
+    }
+    for name in ["string=?", "string<?", "string>?", "string<=?", "string>=?", "string-ci=?", "string-ci<?", "string-ci>?", "string-ci<=?", "string-ci>=?"] {
+      primitive(name, in: env) { args in
+        guard args.count == 2 else { throw SchemeError.arity("\(name) expects 2 arguments") }
+        let strings = try args.map { try schemeString($0, name).string }
+        if name.hasPrefix("string-ci") {
+          let values = strings.map { Array($0).map(scalarCaseKey) }
+          for pair in zip(values, values.dropFirst()) where !compareCharacterKeys(pair.0, pair.1, name) { return .boolean(false) }
+          return .boolean(true)
+        }
+        let values = strings
+        for pair in zip(values, values.dropFirst()) {
+          let ok: Bool
+          switch name.replacingOccurrences(of: "string-ci", with: "string") {
+          case "string=?": ok = pair.0 == pair.1
+          case "string<?": ok = pair.0 < pair.1
+          case "string>?": ok = pair.0 > pair.1
+          case "string<=?": ok = pair.0 <= pair.1
+          default: ok = pair.0 >= pair.1
+          }
+          if !ok { return .boolean(false) }
+        }
+        return .boolean(true)
+      }
+    }
+
+    primitive("string", in: env) { args in
+      .string(SchemeString(characters: try args.map { try character($0, "string") }))
     }
     primitive("make-string", in: env) { args in
       guard args.count == 1 || args.count == 2 else {
@@ -279,10 +331,10 @@ extension Interpreter {
       guard a <= b && b <= chars.count else { throw SchemeError.numeric("invalid substring range") }
       return .string(SchemeString(characters: Array(chars[a..<b])))
     }
-    primitive("string-append", in: env) {
+    primitive("string-append", in: env) { args in
       .string(
         SchemeString(
-          characters: try $0.flatMap { try schemeString($0, "string-append").characters }
+          characters: try args.flatMap { try schemeString($0, "string-append").characters }
         )
       )
     }
@@ -315,9 +367,7 @@ extension Interpreter {
       "string-ci>?", "string-ci<=?", "string-ci>=?",
     ] {
       primitive(name, in: env) { args in
-        guard args.count >= 2 else {
-          throw SchemeError.arity("\(name) expects at least 2 arguments")
-        }
+        guard args.count == 2 else { throw SchemeError.arity("\(name) expects 2 arguments") }
         let values = try args.map { try schemeString($0, name) }
         let keys = values.map { value in
           value.characters.map(name.contains("-ci") ? scalarCaseKey : String.init)
@@ -328,7 +378,7 @@ extension Interpreter {
       }
     }
 
-    primitive("vector", in: env) { .vector(SchemeVector($0)) }
+    primitive("vector", in: env) { args in .vector(SchemeVector(args)) }
     primitive("make-vector", in: env) { args in
       guard args.count == 1 || args.count == 2 else {
         throw SchemeError.arity("make-vector expects 1 or 2 arguments")

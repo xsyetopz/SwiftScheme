@@ -4,10 +4,17 @@ import SwiftSchemeNumeric
 enum Writer {
   static func write(_ value: Value) -> String {
     var active = Set<ObjectIdentifier>()
-    return render(value, &active)
+    return render(value, &active, display: false)
   }
 
-  private static func render(_ value: Value, _ active: inout Set<ObjectIdentifier>) -> String {
+  static func display(_ value: Value) -> String {
+    var active = Set<ObjectIdentifier>()
+    return render(value, &active, display: true)
+  }
+
+  private static func render(_ value: Value, _ active: inout Set<ObjectIdentifier>, display: Bool)
+    -> String
+  {
     switch value {
     case .integer(let number): return number.description
     case .rational(let number): return number.description
@@ -16,18 +23,20 @@ enum Writer {
       return SchemeNumber.complex(real: real, imaginary: imaginary).description
     case .boolean(let value): return value ? "#t" : "#f"
     case .character(let value):
+      if display { return String(value) }
       guard value.unicodeScalars.count == 1 else { return quoted(String(value)) }
       if value == " " { return "#\\space" }
       if value == "\n" { return "#\\newline" }
       return "#\\\(value)"
     case .symbol(let name): return symbolSpelling(name)
-    case .string(let value): return quoted(value.string)
+    case .string(let value): return display ? value.string : quoted(value.string)
     case .vector(let vector):
       let identifier = ObjectIdentifier(vector)
       guard active.insert(identifier).inserted else { return "#<cycle>" }
       defer { active.remove(identifier) }
-      return "#(" + vector.elements.map { render($0, &active) }.joined(separator: " ") + ")"
-    case .pair(let pair): return renderPair(pair, &active)
+      return "#("
+        + vector.elements.map { render($0, &active, display: display) }.joined(separator: " ") + ")"
+    case .pair(let pair): return renderPair(pair, &active, display: display)
     case .procedure: return "#<procedure>"
     case .promise: return "#<promise>"
     case .port: return "#<port>"
@@ -56,7 +65,9 @@ enum Writer {
     return result
   }
 
-  private static func renderPair(_ pair: Pair, _ active: inout Set<ObjectIdentifier>) -> String {
+  private static func renderPair(_ pair: Pair, _ active: inout Set<ObjectIdentifier>, display: Bool)
+    -> String
+  {
     let root = ObjectIdentifier(pair)
     guard active.insert(root).inserted else { return "#<cycle>" }
     defer { active.remove(root) }
@@ -69,10 +80,13 @@ enum Writer {
         cursor = .empty
         break
       }
-      pieces.append(render(cell.car, &active))
+      pieces.append(render(cell.car, &active, display: display))
       cursor = cell.cdr
     }
-    if case .empty = cursor {} else { pieces.append(". " + render(cursor, &active)) }
+    if case .empty = cursor {
+    } else {
+      pieces.append(". " + render(cursor, &active, display: display))
+    }
     return "(" + pieces.joined(separator: " ") + ")"
   }
 }

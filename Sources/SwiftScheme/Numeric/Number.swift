@@ -1,11 +1,17 @@
 import Foundation
 
+/// A normalized exact rational number.
 public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible {
+  /// The numeric value or property represented by this instance.
   public static let zero = Self(0)
+  /// The numeric value or property represented by this instance.
   public static let one = Self(1)
+  /// The numeric value or property represented by this instance.
   public let numerator: BigInt
+  /// The numeric value or property represented by this instance.
   public let denominator: BigInt
 
+  /// Creates a numeric value.
   public init?(_ numerator: BigInt, _ denominator: BigInt = .one) {
     guard !denominator.isZero else { return nil }
     let divisor = BigInt.gcd(numerator, denominator)
@@ -21,6 +27,7 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
     }
   }
 
+  /// Creates a numeric value.
   public init(_ integer: Int64) {
     numerator = BigInt(integer)
     denominator = .one
@@ -33,38 +40,88 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
     return value
   }
 
+  /// The numeric value or property represented by this instance.
   public var isInteger: Bool { denominator == .one }
+  /// The numeric value or property represented by this instance.
   public var isZero: Bool { numerator.isZero }
+  /// The numeric value or property represented by this instance.
   public var signum: Int { numerator.signum }
+  /// The numeric value or property represented by this instance.
   public var absoluteValue: Self { Self.make(numerator.absoluteValue, denominator) }
+  /// The numeric value or property represented by this instance.
   public var doubleValue: Double {
     guard !numerator.isZero else { return 0 }
-    let numeratorApproximation = numerator.absoluteValue.binaryApproximation
-    let denominatorApproximation = denominator.binaryApproximation
-    var significand = numeratorApproximation.significand / denominatorApproximation.significand
-    var exponent = numeratorApproximation.exponent - denominatorApproximation.exponent
-    if significand >= 2 {
-      significand /= 2
-      exponent += 1
-    } else if significand < 1 {
-      significand *= 2
-      exponent -= 1
+
+    // Round the exact ratio to binary64, rather than dividing separately
+    // rounded approximations of the numerator and denominator. The latter
+    // can be one ulp wrong near a tie.
+    let numerator = self.numerator.absoluteValue
+    let denominator = self.denominator
+    func compareWithPowerOfTwo(_ exponent: Int) -> Int {
+      if exponent >= 0 {
+        let scaledDenominator = denominator.shiftedLeft(exponent)
+        return numerator < scaledDenominator ? -1 : (numerator == scaledDenominator ? 0 : 1)
+      }
+      let scaledNumerator = numerator.shiftedLeft(-exponent)
+      return scaledNumerator < denominator ? -1 : (scaledNumerator == denominator ? 0 : 1)
     }
-    let value = Foundation.scalbn(significand, Int32(clamping: exponent))
-    return numerator.signum < 0 ? -value : value
+
+    // The bit-width difference is within one of floor(log2(numerator /
+    // denominator)); correct that estimate with exact comparisons.
+    var exponent = numerator.bitWidth - denominator.bitWidth
+    while compareWithPowerOfTwo(exponent) < 0 { exponent -= 1 }
+    while compareWithPowerOfTwo(exponent + 1) >= 0 { exponent += 1 }
+
+    func roundedQuotient(_ dividend: BigInt, _ divisor: BigInt) -> BigInt {
+      guard let division = try? dividend.quotientAndRemainder(dividingBy: divisor) else {
+        preconditionFailure("Rational invariant violated")
+      }
+      var quotient = division.quotient
+      let twiceRemainder = division.remainder * BigInt(2)
+      if twiceRemainder > divisor
+        || (twiceRemainder == divisor && (try? quotient.magnitudeModulo(2)) == 1)
+      {
+        quotient += .one
+      }
+      return quotient
+    }
+
+    let significand: BigInt
+    if exponent < -1022 {
+      // Subnormal values are integral multiples of 2^-1074.
+      significand = roundedQuotient(numerator.shiftedLeft(1074), denominator)
+      if significand.isZero { return self.numerator.signum < 0 ? -0.0 : 0.0 }
+      let value = Foundation.scalbn(significand.doubleValue, -1074)
+      return self.numerator.signum < 0 ? -value : value
+    }
+
+    let shift = 52 - exponent
+    let dividend = shift >= 0 ? numerator.shiftedLeft(shift) : numerator
+    let divisor = shift >= 0 ? denominator : denominator.shiftedLeft(-shift)
+    var rounded = roundedQuotient(dividend, divisor)
+    if rounded == BigInt(1).shiftedLeft(53) {
+      rounded = BigInt(1).shiftedLeft(52)
+      exponent += 1
+    }
+    let value = Foundation.scalbn(rounded.doubleValue, Int32(clamping: exponent - 52))
+    return self.numerator.signum < 0 ? -value : value
   }
+  /// The numeric value or property represented by this instance.
   public var description: String {
     isInteger ? numerator.description : "\(numerator)/\(denominator)"
   }
 
+  /// Performs the corresponding numeric operation.
   public static func < (lhs: Self, rhs: Self) -> Bool {
     lhs.numerator * rhs.denominator < rhs.numerator * lhs.denominator
   }
 
+  /// Performs the corresponding numeric operation.
   public static prefix func - (value: Self) -> Self {
     Self.make(-value.numerator, value.denominator)
   }
 
+  /// Performs the corresponding numeric operation.
   public static func + (lhs: Self, rhs: Self) -> Self {
     Self.make(
       lhs.numerator * rhs.denominator + rhs.numerator * lhs.denominator,
@@ -72,17 +129,21 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
     )
   }
 
+  /// Performs the corresponding numeric operation.
   public static func - (lhs: Self, rhs: Self) -> Self { lhs + -rhs }
 
+  /// Performs the corresponding numeric operation.
   public static func * (lhs: Self, rhs: Self) -> Self {
     Self.make(lhs.numerator * rhs.numerator, lhs.denominator * rhs.denominator)
   }
 
+  /// Performs the corresponding numeric operation.
   public static func / (lhs: Self, rhs: Self) throws -> Self {
     guard !rhs.isZero else { throw BigIntError.divisionByZero }
     return Self.make(lhs.numerator * rhs.denominator, lhs.denominator * rhs.numerator)
   }
 
+  /// Performs the corresponding numeric operation.
   public func power(_ exponent: Int) throws -> Self {
     if exponent >= 0 {
       return Self.make(try numerator.power(exponent), try denominator.power(exponent))
@@ -92,6 +153,7 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
     return Self.make(try denominator.power(-exponent), try numerator.power(-exponent))
   }
 
+  /// The numeric value or property represented by this instance.
   public var exactSquareRoot: Self? {
     guard signum >= 0, let numerator = numerator.exactSquareRoot,
       let denominator = denominator.exactSquareRoot
@@ -99,8 +161,10 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
     return Self(numerator, denominator)
   }
 
+  /// A numeric rounding or classification choice.
   public enum Rounding { case floor, ceiling, truncate, nearestEven }
 
+  /// Performs the corresponding numeric operation.
   public func rounded(_ rule: Rounding) -> BigInt {
     guard let division = try? numerator.quotientAndRemainder(dividingBy: denominator) else {
       preconditionFailure("Rational invariant violated")
@@ -121,10 +185,13 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
     }
   }
 
+  /// Performs the corresponding numeric operation.
   public static func exactDecimal(significand: BigInt, fractionalDigits: Int, exponent: Int)
     -> Self?
   {
-    let scale = fractionalDigits - exponent
+    guard fractionalDigits >= 0 else { return nil }
+    let (scale, overflow) = fractionalDigits.subtractingReportingOverflow(exponent)
+    guard !overflow else { return nil }
     if scale <= 0 {
       guard scale != Int.min, let power = try? BigInt(10).power(-scale) else { return nil }
       return Self(significand * power)
@@ -133,6 +200,7 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
     return Self(significand, power)
   }
 
+  /// Performs the corresponding numeric operation.
   public static func fromFiniteDouble(_ value: Double) -> Self? {
     guard value.isFinite else { return nil }
     if value == 0 { return Self(0) }
@@ -160,261 +228,5 @@ public struct Rational: Hashable, Sendable, Comparable, CustomStringConvertible 
     }
     if negative { numerator = -numerator }
     return Self(numerator, denominator)
-  }
-}
-
-public enum RealComponent: Hashable, Sendable {
-  case exact(Rational)
-  case inexact(Double)
-
-  public init(_ integer: Int64) { self = .exact(Rational(integer)) }
-  public var isExact: Bool { if case .exact = self { true } else { false } }
-  public var doubleValue: Double {
-    switch self {
-    case .exact(let value): value.doubleValue
-    case .inexact(let value): value
-    }
-  }
-  public var isZero: Bool {
-    switch self {
-    case .exact(let value): value.isZero
-    case .inexact(let value): value == 0
-    }
-  }
-  public var signum: Int {
-    switch self {
-    case .exact(let value): value.signum
-    case .inexact(let value): value == 0 ? 0 : (value < 0 ? -1 : 1)
-    }
-  }
-
-  public static prefix func - (value: Self) -> Self {
-    switch value {
-    case .exact(let x): .exact(-x)
-    case .inexact(let x): .inexact(-x)
-    }
-  }
-
-  public static func + (lhs: Self, rhs: Self) -> Self {
-    switch (lhs, rhs) {
-    case (.exact(let a), .exact(let b)): .exact(a + b)
-    default: .inexact(lhs.doubleValue + rhs.doubleValue)
-    }
-  }
-
-  public static func - (lhs: Self, rhs: Self) -> Self { lhs + -rhs }
-
-  public static func * (lhs: Self, rhs: Self) -> Self {
-    switch (lhs, rhs) {
-    case (.exact(let a), .exact(let b)): .exact(a * b)
-    default: .inexact(lhs.doubleValue * rhs.doubleValue)
-    }
-  }
-
-  public static func / (lhs: Self, rhs: Self) throws -> Self {
-    guard !rhs.isZero else { throw BigIntError.divisionByZero }
-    switch (lhs, rhs) {
-    case (.exact(let a), .exact(let b)): return .exact(try a / b)
-    default: return .inexact(lhs.doubleValue / rhs.doubleValue)
-    }
-  }
-}
-
-public enum SchemeNumber: Hashable, Sendable, CustomStringConvertible {
-  case real(RealComponent)
-  case complex(real: RealComponent, imaginary: RealComponent)
-
-  public static let zero = Self.real(.exact(Rational(0)))
-  public static let one = Self.real(.exact(Rational(1)))
-
-  public init(_ integer: Int64) { self = .real(.exact(Rational(integer))) }
-  public init(_ integer: BigInt) { self = .real(.exact(Rational(integer) ?? .zero)) }
-  public init(_ rational: Rational) { self = .real(.exact(rational)) }
-  public init(_ inexact: Double) { self = .real(.inexact(inexact)) }
-
-  public static func rectangular(_ real: RealComponent, _ imaginary: RealComponent) -> Self {
-    guard imaginary.isZero else { return .complex(real: real, imaginary: imaginary) }
-    if imaginary.isExact { return .real(real) }
-    return real.isExact ? .real(.inexact(real.doubleValue)) : .real(real)
-  }
-
-  public var parts: (real: RealComponent, imaginary: RealComponent) {
-    switch self {
-    case .real(let value): (value, RealComponent(0))
-    case .complex(let real, let imaginary): (real, imaginary)
-    }
-  }
-
-  public var isExact: Bool {
-    let value = parts
-    return value.real.isExact && value.imaginary.isExact
-  }
-  public var isReal: Bool { parts.imaginary.isZero }
-  public var isRational: Bool {
-    guard isReal else { return false }
-    if case .exact = parts.real { return true }
-    return parts.real.doubleValue.isFinite
-  }
-  public var isInteger: Bool {
-    guard isReal else { return false }
-    switch parts.real {
-    case .exact(let value): return value.isInteger
-    case .inexact(let value): return value.isFinite && value.rounded() == value
-    }
-  }
-  public var isZero: Bool { parts.real.isZero && parts.imaginary.isZero }
-
-  public var description: String {
-    switch self {
-    case .real(let value): return Self.describe(value)
-    case .complex(let real, let imaginary):
-      let imaginaryText = Self.describe(imaginary)
-      let separator = imaginaryText.hasPrefix("-") || imaginaryText.hasPrefix("+") ? "" : "+"
-      return Self.describe(real) + separator + imaginaryText + "i"
-    }
-  }
-
-  public func string(radix: Int = 10) -> String? {
-    guard [2, 8, 10, 16].contains(radix) else { return nil }
-    func component(_ value: RealComponent) -> String? {
-      switch value {
-      case .exact(let rational):
-        let numerator = rational.numerator.string(radix: radix)
-        return rational.isInteger
-          ? numerator : numerator + "/" + rational.denominator.string(radix: radix)
-      case .inexact(let number):
-        guard radix == 10 else {
-          guard let rational = Rational.fromFiniteDouble(number) else { return nil }
-          let numerator = (rational.numerator * BigInt(radix)).string(radix: radix)
-          return numerator + "/" + rational.denominator.string(radix: radix) + "#"
-        }
-        return Self.describe(.inexact(number))
-      }
-    }
-    switch self {
-    case .real(let value): return component(value)
-    case .complex(let real, let imaginary):
-      guard let a = component(real), let b = component(imaginary) else { return nil }
-      let separator = b.hasPrefix("-") || b.hasPrefix("+") ? "" : "+"
-      return a + separator + b + "i"
-    }
-  }
-
-  private static func describe(_ value: RealComponent) -> String {
-    switch value {
-    case .exact(let rational): return rational.description
-    case .inexact(let number):
-      if number.isNaN { return "+nan.0" }
-      if number == .infinity { return "+inf.0" }
-      if number == -.infinity { return "-inf.0" }
-      var text = String(number)
-      if !text.contains(".") && !text.lowercased().contains("e") { text += ".0" }
-      return text
-    }
-  }
-
-  public static func numericallyEqual(_ lhs: Self, _ rhs: Self) -> Bool {
-    let a = lhs.parts
-    let b = rhs.parts
-    return componentEqual(a.real, b.real) && componentEqual(a.imaginary, b.imaginary)
-  }
-
-  private static func componentEqual(_ lhs: RealComponent, _ rhs: RealComponent) -> Bool {
-    switch (lhs, rhs) {
-    case (.exact(let a), .exact(let b)): return a == b
-    case (.inexact(let a), .inexact(let b)): return a == b
-    case (.exact(let a), .inexact(let b)), (.inexact(let b), .exact(let a)):
-      guard let exactB = Rational.fromFiniteDouble(b) else { return false }
-      return a == exactB
-    }
-  }
-
-  public static prefix func - (value: Self) -> Self {
-    let value = value.parts
-    return rectangular(-value.real, -value.imaginary)
-  }
-
-  public static func + (lhs: Self, rhs: Self) -> Self {
-    let a = lhs.parts
-    let b = rhs.parts
-    return rectangular(a.real + b.real, a.imaginary + b.imaginary)
-  }
-
-  public static func - (lhs: Self, rhs: Self) -> Self { lhs + -rhs }
-
-  public static func * (lhs: Self, rhs: Self) -> Self {
-    let a = lhs.parts
-    let b = rhs.parts
-    return rectangular(
-      a.real * b.real - a.imaginary * b.imaginary,
-      a.real * b.imaginary + a.imaginary * b.real
-    )
-  }
-
-  public static func += (lhs: inout Self, rhs: Self) { lhs = lhs + rhs }
-  public static func -= (lhs: inout Self, rhs: Self) { lhs = lhs - rhs }
-  public static func *= (lhs: inout Self, rhs: Self) { lhs = lhs * rhs }
-
-  public static func / (lhs: Self, rhs: Self) throws -> Self {
-    let a = lhs.parts
-    let b = rhs.parts
-    let denominator = b.real * b.real + b.imaginary * b.imaginary
-    guard !denominator.isZero else { throw BigIntError.divisionByZero }
-    return rectangular(
-      try (a.real * b.real + a.imaginary * b.imaginary) / denominator,
-      try (a.imaginary * b.real - a.real * b.imaginary) / denominator
-    )
-  }
-
-  public var exactMagnitude: Rational? {
-    let value = parts
-    guard case .exact(let real) = value.real, case .exact(let imaginary) = value.imaginary else {
-      return nil
-    }
-    if imaginary.isZero { return real.absoluteValue }
-    return (real * real + imaginary * imaginary).exactSquareRoot
-  }
-
-  public var magnitude: Double {
-    exactMagnitude?.doubleValue
-      ?? Foundation.hypot(parts.real.doubleValue, parts.imaginary.doubleValue)
-  }
-
-  public var angle: Double {
-    let value = parts
-    let angle = Foundation.atan2(value.imaginary.doubleValue, value.real.doubleValue)
-    return angle == -.pi ? .pi : angle
-  }
-
-  public func exactPower(_ exponent: Int) throws -> Self {
-    if exponent == 0 { return .one }
-    if exponent < 0 {
-      guard exponent != Int.min else { throw BigIntError.negativeExponent }
-      return try .one / exactPower(-exponent)
-    }
-    var exponent = exponent
-    var factor = self
-    var result = Self.one
-    while exponent != 0 {
-      if exponent & 1 == 1 { result *= factor }
-      exponent >>= 1
-      if exponent != 0 { factor *= factor }
-    }
-    return result
-  }
-
-  public static func polar(magnitude: RealComponent, angle: RealComponent) -> Self {
-    if angle.isZero { return rectangular(magnitude, RealComponent(0)) }
-    let radius = magnitude.doubleValue
-    let theta = angle.doubleValue
-    return rectangular(
-      .inexact(radius * Foundation.cos(theta)),
-      .inexact(radius * Foundation.sin(theta))
-    )
-  }
-
-  public func inexact() -> Self {
-    let value = parts
-    return Self.rectangular(.inexact(value.real.doubleValue), .inexact(value.imaginary.doubleValue))
   }
 }

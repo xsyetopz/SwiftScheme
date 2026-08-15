@@ -5,6 +5,14 @@ import SwiftSchemePrimitives
 import SwiftSchemeRuntime
 
 extension Interpreter {
+  func isEvalExpression(_ value: Value) -> Bool {
+    switch value {
+    case .integer, .rational, .real, .complex, .boolean, .character, .string, .symbol, .pair:
+      return true
+    default: return false
+    }
+  }
+
   func handleSpecial(
     _ special: Special,
     arguments: [Value],
@@ -27,15 +35,21 @@ extension Interpreter {
       )
     case .callCC:
       try require(arguments, 1, "call-with-current-continuation")
+      try requireProcedure(arguments[0], "call-with-current-continuation")
       let captured = Captured(continuation: continuation, winds: winds)
       control = .apply(arguments[0], [.procedure(Procedure(.continuation(captured)))])
     case .values: control = .values(arguments)
     case .callWithValues:
       try require(arguments, 2, "call-with-values")
+      try requireProcedure(arguments[0], "call-with-values producer")
+      try requireProcedure(arguments[1], "call-with-values consumer")
       continuation = .callValuesFrame(arguments[1], continuation)
       control = .apply(arguments[0], [])
     case .dynamicWind:
       try require(arguments, 3, "dynamic-wind")
+      try requireProcedure(arguments[0], "dynamic-wind before")
+      try requireProcedure(arguments[1], "dynamic-wind thunk")
+      try requireProcedure(arguments[2], "dynamic-wind after")
       windSerial += 1
       let wind = Wind(windSerial, arguments[0], arguments[2])
       continuation = .windBeforeFrame(arguments[1], arguments[2], wind, continuation)
@@ -60,10 +74,14 @@ extension Interpreter {
       guard case .environment(let environment) = arguments[1] else {
         throw SchemeError.type("eval expects an environment")
       }
-      if case .pair(let form) = arguments[0], case .symbol(let keyword) = form.car,
-        keyword == "define" || keyword == "define-syntax", environment.cell(keyword) == nil,
-        environment.macro(keyword) == nil
-      {
+      guard isEvalExpression(arguments[0]) else {
+        throw SchemeError.syntax("eval expects an expression")
+      }
+      let expanded = try expandedBody([arguments[0]], in: environment)
+      if expanded.contains(where: {
+        isDefinitionForm($0, "define", in: environment)
+          || isDefinitionForm($0, "define-syntax", in: environment)
+      }) {
         try environment.requireDefinitionAllowed()
         throw SchemeError.syntax("eval expects an expression")
       }
@@ -96,14 +114,13 @@ extension Interpreter {
         throw SchemeError.io("cannot load \(path): \(error.localizedDescription)")
       }
       var reader = Reader(source)
-      let forms = try reader.readAll()
-      if forms.isEmpty {
+      guard let form = try reader.readOne() else {
         control = .values([.unspecified])
-      } else {
-        continuation = .discardFrame(continuation)
-        continuation = .beginFrame(Array(forms.dropFirst()), global, true, continuation)
-        control = .expression(forms[0], global)
+        break
       }
+      noteReaderSpellings(reader)
+      continuation = .loadFrame(source, reader.index, global, continuation)
+      control = .expression(form, global)
     case .callWithInputFile, .withInputFromFile:
       try require(
         arguments,
@@ -111,14 +128,20 @@ extension Interpreter {
         special == .callWithInputFile ? "call-with-input-file" : "with-input-from-file"
       )
       let path = try schemeString(arguments[0], "input file").string
+      try requireProcedure(
+        arguments[1],
+        special == .callWithInputFile ? "call-with-input-file" : "with-input-from-file"
+      )
       if special == .callWithInputFile {
         let opened: SchemePort
         do {
-          opened = SchemePort(
+          opened = try SchemePort(
             handle: try FileHandle(forReadingFrom: URL(fileURLWithPath: path)),
             mode: .input
           )
-        } catch { throw SchemeError.io(error.localizedDescription) }
+        } catch let error as SchemeError { throw error } catch {
+          throw SchemeError.io(error.localizedDescription)
+        }
         continuation = .closePortFrame(opened, continuation)
         control = .apply(arguments[1], [.port(opened)])
       } else {
@@ -130,11 +153,13 @@ extension Interpreter {
               try require(args, 0, "with-input-from-file before")
               let opened: SchemePort
               do {
-                opened = SchemePort(
+                opened = try SchemePort(
                   handle: try FileHandle(forReadingFrom: URL(fileURLWithPath: state.path)),
                   mode: .input
                 )
-              } catch { throw SchemeError.io(error.localizedDescription) }
+              } catch let error as SchemeError { throw error } catch {
+                throw SchemeError.io(error.localizedDescription)
+              }
               opened.position = state.position
               state.previous = currentInput
               state.opened = opened
@@ -158,15 +183,28 @@ extension Interpreter {
         )
         windSerial += 1
         let wind = Wind(windSerial, before, after)
+        wind.cleanup = { [weak self] in
+          guard let self else { return }
+          if let opened = state.opened {
+            try? closePortHandle(opened)
+            state.opened = nil
+          }
+          if let previous = state.previous {
+            self.currentInput = previous
+            state.previous = nil
+          }
+        }
         continuation = .windBeforeFrame(arguments[1], after, wind, continuation)
         control = .apply(before, [])
       }
     case .callWithInputString:
       try require(arguments, 2, "call-with-input-string")
-      let port = SchemePort(input: try schemeString(arguments[0], "call-with-input-string").string)
+      try requireProcedure(arguments[1], "call-with-input-string")
+      let port = SchemePort(input: try schemeString(arguments[0], "call-with-input-string").string, defaultReady: true)
       control = .apply(arguments[1], [.port(port)])
     case .callWithOutputString:
       try require(arguments, 1, "call-with-output-string")
+      try requireProcedure(arguments[0], "call-with-output-string")
       let port = SchemePort(output: true)
       continuation = .outputStringFrame(port, continuation)
       control = .apply(arguments[0], [.port(port)])
@@ -177,17 +215,23 @@ extension Interpreter {
         special == .callWithOutputFile ? "call-with-output-file" : "with-output-to-file"
       )
       let path = try schemeString(arguments[0], "output file").string
+      try requireProcedure(
+        arguments[1],
+        special == .callWithOutputFile ? "call-with-output-file" : "with-output-to-file"
+      )
       guard FileManager.default.createFile(atPath: path, contents: nil) else {
         throw SchemeError.io("cannot create \(path)")
       }
       if special == .callWithOutputFile {
         let opened: SchemePort
         do {
-          opened = SchemePort(
+          opened = try SchemePort(
             handle: try FileHandle(forWritingTo: URL(fileURLWithPath: path)),
             mode: .output
           )
-        } catch { throw SchemeError.io(error.localizedDescription) }
+        } catch let error as SchemeError { throw error } catch {
+          throw SchemeError.io(error.localizedDescription)
+        }
         continuation = .closePortFrame(opened, continuation)
         control = .apply(arguments[1], [.port(opened)])
       } else {
@@ -201,8 +245,10 @@ extension Interpreter {
               do {
                 let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: state.path))
                 try handle.seek(toOffset: state.offset)
-                opened = SchemePort(handle: handle, mode: .output)
-              } catch { throw SchemeError.io(error.localizedDescription) }
+                opened = try SchemePort(handle: handle, mode: .output)
+              } catch let error as SchemeError { throw error } catch {
+                throw SchemeError.io(error.localizedDescription)
+              }
               state.previous = currentOutput
               state.opened = opened
               currentOutput = opened
@@ -225,6 +271,17 @@ extension Interpreter {
         )
         windSerial += 1
         let wind = Wind(windSerial, before, after)
+        wind.cleanup = { [weak self] in
+          guard let self else { return }
+          if let opened = state.opened {
+            try? closePortHandle(opened)
+            state.opened = nil
+          }
+          if let previous = state.previous {
+            self.currentOutput = previous
+            state.previous = nil
+          }
+        }
         continuation = .windBeforeFrame(arguments[1], after, wind, continuation)
         control = .apply(before, [])
       }

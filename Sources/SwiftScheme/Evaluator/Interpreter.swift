@@ -4,7 +4,9 @@ import SwiftSchemeNumeric
 import SwiftSchemePrimitives
 import SwiftSchemeRuntime
 
+/// Evaluates R5RS Scheme source and owns its environments, ports, and heap.
 public final class Interpreter {
+  /// Receives text emitted by display and related output procedures.
   public typealias Output = (String) -> Void
 
   let heap: SchemeHeap
@@ -17,13 +19,14 @@ public final class Interpreter {
   var windSerial = 0
   var exportedRoots: [Value] = []
 
-  public init(output: @escaping Output = { print($0, terminator: "") }) {
+  /// Creates an interpreter with optional output and initial input text.
+  public init(output: @escaping Output = { print($0, terminator: "") }, input: String = "") {
     self.output = output
     let heap = SchemeHeap()
     self.heap = heap
     self.global = heap.withActive { SchemeEnvironment() }
     self.report = heap.withActive { SchemeEnvironment() }
-    currentInput = SchemePort(input: "")
+    currentInput = SchemePort(input: input, defaultReady: true)
     currentOutput = SchemePort { output($0) }
     heap.withActive {
       installPrimitives(in: report)
@@ -32,14 +35,12 @@ public final class Interpreter {
     global.symbolSpellings = report.symbolSpellings
   }
 
+  /// Evaluates all top-level forms in source and returns the last value.
   @discardableResult public func evaluate(_ source: String) throws -> Value {
     try heap.withActive {
       var reader = Reader(source)
       let forms = try reader.readAll()
-      for (canonical, spelling) in reader.spellings {
-        global.noteSymbol(canonical, spelling: spelling)
-        report.noteSymbol(canonical, spelling: spelling)
-      }
+      noteReaderSpellings(reader)
       var result: Value = .unspecified
       for form in forms {
         let values = try run(.expression(form, global))
@@ -53,6 +54,7 @@ public final class Interpreter {
     }
   }
 
+  /// Parses source into external-form values without evaluating them.
   public func read(_ source: String) throws -> [Value] {
     try heap.withActive {
       var reader = Reader(source)
@@ -62,17 +64,21 @@ public final class Interpreter {
     }
   }
 
+  /// Reports allocation and collection counters for the interpreter heap.
   public var heapStatistics: HeapStatistics { heap.statistics }
 
+  /// Collects unreachable Scheme objects while retaining the supplied values.
   @discardableResult public func collectGarbage(retaining values: [Value] = []) -> HeapStatistics {
     var roots: [any SchemeHeapNode] = [global, report]
-    (exportedRoots + values).forEach { traceValue($0) { roots.append($0) } }
+    for value in exportedRoots + values { traceValue(value) { roots.append($0) } }
     return heap.collect(roots: roots)
   }
 
+  /// Returns whether source is complete enough for interactive evaluation.
   public func isComplete(_ source: String) -> Bool {
     do {
-      _ = try read(source)
+      var reader = Reader(source)
+      _ = try reader.readAll()
       return true
     } catch let SchemeError.lexical(message, _, _) {
       return
@@ -81,15 +87,41 @@ public final class Interpreter {
     } catch { return true }
   }
 
+  /// Returns the R5RS external representation of a value.
   public func write(_ value: Value) -> String { value.written }
 
-  func recordSymbols(_ value: Value, in environment: SchemeEnvironment) {
+  func noteReaderSpellings(_ reader: Reader) {
+    for (canonical, spelling) in reader.spellings {
+      global.noteSymbol(canonical, spelling: spelling)
+      report.noteSymbol(canonical, spelling: spelling)
+    }
+  }
+
+  func recordSymbols(_ value: Value, in environment: SchemeEnvironment) throws {
+    var active = Set<ObjectIdentifier>()
+    try recordSymbols(value, in: environment, active: &active)
+  }
+
+  private func recordSymbols(
+    _ value: Value,
+    in environment: SchemeEnvironment,
+    active: inout Set<ObjectIdentifier>
+  ) throws {
     switch value {
     case .symbol(let name): _ = name
     case .pair(let pair):
-      recordSymbols(pair.car, in: environment)
-      recordSymbols(pair.cdr, in: environment)
-    case .vector(let vector): for item in vector.elements { recordSymbols(item, in: environment) }
+      guard active.insert(ObjectIdentifier(pair)).inserted else {
+        throw SchemeError.syntax("cyclic expression")
+      }
+      defer { active.remove(ObjectIdentifier(pair)) }
+      try recordSymbols(pair.car, in: environment, active: &active)
+      try recordSymbols(pair.cdr, in: environment, active: &active)
+    case .vector(let vector):
+      guard active.insert(ObjectIdentifier(vector)).inserted else {
+        throw SchemeError.syntax("cyclic expression")
+      }
+      defer { active.remove(ObjectIdentifier(vector)) }
+      for item in vector.elements { try recordSymbols(item, in: environment, active: &active) }
     default: break
     }
   }

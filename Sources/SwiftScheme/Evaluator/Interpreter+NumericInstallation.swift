@@ -84,7 +84,10 @@ extension Interpreter {
       let n = try schemeNumber(args[0])
       guard n.isReal else { throw SchemeError.type("abs expects a real number") }
       let r = n.parts.real
-      return numberValue(.real(r.signum < 0 ? -r : r))
+      switch r {
+      case .exact: return numberValue(.real(r.signum < 0 ? -r : r))
+      case .inexact(let value): return .real(abs(value))
+      }
     }
     for name in ["max", "min"] {
       primitive(name, in: env) { args in
@@ -214,9 +217,38 @@ extension Interpreter {
         let result = exponent.isZero ? SchemeNumber.one : SchemeNumber.zero
         return numberValue(base.isExact && exponent.isExact ? result : result.inexact())
       }
+      if base.isExact, base.isReal, case .exact(let baseReal) = base.parts.real, baseReal.isInteger,
+        baseReal.numerator == .one, exponent.isExact
+      {
+        return numberValue(SchemeNumber.one)
+      }
       if let e = exactIntegerExponent(exponent) {
-        do { return numberValue(try base.exactPower(e)) } catch {
-          throw SchemeError.numeric("division by zero")
+        if base.isExact, base.isReal, case .exact(let baseReal) = base.parts.real,
+          baseReal.isInteger, baseReal.numerator == -BigInt.one
+        {
+          let odd = (try? e.magnitudeModulo(2)) == 1
+          return numberValue(odd ? SchemeNumber(Int64(-1)) : SchemeNumber.one)
+        }
+        if let intExponent = e.exactInt {
+          do { return numberValue(try base.exactPower(intExponent)) } catch BigIntError
+            .divisionByZero
+          { throw SchemeError.numeric("division by zero") } catch {
+            throw SchemeError.numeric("exact exponent is out of range")
+          }
+        }
+        if base.isExact { throw SchemeError.numeric("exact exponent is out of range") }
+      }
+      if let exact = exactNegativeUnitHalfPower(base, exponent) { return numberValue(exact) }
+      if let exact = exactRationalPower(base, exponent) { return numberValue(exact) }
+      if !exponent.isExact, base.isReal, exponent.isReal {
+        let realExponent = exponent.parts.real.doubleValue
+        if realExponent.isFinite, realExponent.rounded() == realExponent,
+          realExponent >= Double(Int.min), realExponent <= Double(Int.max)
+        {
+          do {
+            return numberValue(try base.exactPower(Int(realExponent)).inexact())
+          } catch BigIntError.divisionByZero { throw SchemeError.numeric("division by zero") } catch
+          { throw SchemeError.numeric("exact exponent is out of range") }
         }
       }
       return numberValue(complexPower(base, exponent))
@@ -242,7 +274,9 @@ extension Interpreter {
         )
         return .real(angle == -.pi ? .pi : angle)
       }
-      return numberValue(complexTranscendental("atan", try schemeNumber(args[0])))
+      let value = try schemeNumber(args[0])
+      if value.isReal { return .real(Foundation.atan(value.parts.real.doubleValue)) }
+      return numberValue(complexTranscendental("atan", value))
     }
     primitive("rationalize", in: env) { args in
       try require(args, 2, "rationalize")
@@ -295,9 +329,9 @@ extension Interpreter {
       }
       let radix = args.count == 2 ? try indexRadix(args[1], "string->number") : 10
       let text = try schemeString(args[0], "string->number").string
+      let radixPrefix = "#\(radix == 2 ? "b" : radix == 8 ? "o" : "x")"
       var reader = Reader(
-        hasRadixPrefix(text) || radix == 10
-          ? text : "#\(radix == 2 ? "b" : radix == 8 ? "o" : "x")\(text)"
+        hasRadixPrefix(text) || radix == 10 ? text : addRadixPrefix(text, radixPrefix)
       )
       guard let values = try? reader.readAll(), values.count == 1, let value = values.first,
         isNumber(value)

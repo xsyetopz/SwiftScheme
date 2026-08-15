@@ -65,11 +65,12 @@ extension SyntaxRules {
     _ input: Value,
     path: [Int],
     _ useEnvironment: SchemeEnvironment,
-    into captures: inout [String: Capture]
+    into captures: inout [String: Capture],
+    head: Bool = false
   ) -> Bool {
     switch pattern {
     case .symbol(let name):
-      if name == "_" { return true }
+      if head && name == "_" { return true }
       if name == keyword {
         guard case .symbol(let actual) = input else { return false }
         return actual == name
@@ -81,13 +82,18 @@ extension SyntaxRules {
       if ellipsis == name { return false }
       return bind(name, input, path: path, into: &captures)
     case .pair(let pair):
-      if ellipsis != nil, let patterns = try? array(from: .pair(pair)),
-        let inputs = try? array(from: input)
-      {
-        return matchSequence(patterns, inputs, path: path, useEnvironment, into: &captures)
+      if let patterns = try? array(from: .pair(pair)), let inputs = try? array(from: input) {
+        return matchSequence(
+          patterns,
+          inputs,
+          path: path,
+          useEnvironment,
+          into: &captures,
+          head: head
+        )
       }
       guard case .pair(let actual) = input else { return false }
-      return match(pair.car, actual.car, path: path, useEnvironment, into: &captures)
+      return match(pair.car, actual.car, path: path, useEnvironment, into: &captures, head: head)
         && match(pair.cdr, actual.cdr, path: path, useEnvironment, into: &captures)
     case .vector(let vector):
       guard case .vector(let actual) = input else { return false }
@@ -96,7 +102,8 @@ extension SyntaxRules {
         actual.elements,
         path: path,
         useEnvironment,
-        into: &captures
+        into: &captures,
+        head: false
       )
     default: return equal(pattern, input)
     }
@@ -107,44 +114,71 @@ extension SyntaxRules {
     _ inputs: [Value],
     path: [Int],
     _ useEnvironment: SchemeEnvironment,
-    into captures: inout [String: Capture]
+    into captures: inout [String: Capture],
+    head: Bool = false
   ) -> Bool {
-    var pi = 0
-    var ii = 0
-    while pi < patterns.count {
+    func search(_ patternIndex: Int, _ inputIndex: Int, _ candidate: [String: Capture]) -> [String:
+      Capture]?
+    {
+      if patternIndex == patterns.count { return inputIndex == inputs.count ? candidate : nil }
       let repeated =
-        pi + 1 < patterns.count && ellipsis.map { isSymbol(patterns[pi + 1], $0) } == true
+        patternIndex + 1 < patterns.count && isSymbol(patterns[patternIndex + 1], ellipsis)
+          && (ellipsis != "..." || (definition?.cell("...") == nil && definition?.macro("...") == nil))
       if repeated {
-        let required = patterns.count - pi - 2
-        guard inputs.count - ii >= required else { return false }
-        let count = inputs.count - ii - required
-        if count == 0 { initializeEmpty(patterns[pi], path: path, captures: &captures) }
-        for offset in 0..<count
-        where !match(
-          patterns[pi],
-          inputs[ii + offset],
-          path: path + [offset],
-          useEnvironment,
-          into: &captures
-        ) { return false }
-        ii += count
-        pi += 2
-      } else {
-        guard ii < inputs.count,
-          match(patterns[pi], inputs[ii], path: path, useEnvironment, into: &captures)
-        else { return false }
-        pi += 1
-        ii += 1
+        let required = patterns.count - patternIndex - 2
+        guard inputs.count - inputIndex >= required else { return nil }
+        let maximum = inputs.count - inputIndex - required
+        for count in stride(from: maximum, through: 0, by: -1) {
+          var repeatedCaptures = candidate
+          if count == 0 {
+            initializeEmpty(patterns[patternIndex], path: path, captures: &repeatedCaptures)
+          } else {
+            var matched = true
+            for offset in 0..<count
+            where !match(
+              patterns[patternIndex],
+              inputs[inputIndex + offset],
+              path: path + [offset],
+              useEnvironment,
+              into: &repeatedCaptures,
+              head: head && patternIndex == 0
+            ) {
+              matched = false
+              break
+            }
+            if !matched { continue }
+          }
+          if let result = search(patternIndex + 2, inputIndex + count, repeatedCaptures) {
+            return result
+          }
+        }
+        return nil
       }
+      guard inputIndex < inputs.count else { return nil }
+      var next = candidate
+      guard
+        match(
+          patterns[patternIndex],
+          inputs[inputIndex],
+          path: path,
+          useEnvironment,
+          into: &next,
+          head: head && patternIndex == 0
+        )
+      else { return nil }
+      return search(patternIndex + 1, inputIndex + 1, next)
     }
-    return ii == inputs.count
+
+    guard let result = search(0, 0, captures) else { return false }
+    captures = result
+    return true
   }
 
   func initializeEmpty(_ pattern: Value, path: [Int], captures: inout [String: Capture]) {
     var names = Set<String>()
     collectSymbols(pattern, into: &names)
     names.subtract(literals)
-    names.subtract([keyword, "_", ellipsis ?? ""])
+    names.subtract([keyword, ellipsis])
     for name in names {
       if let capture = insertingEmpty(captures[name], path: path[...]) { captures[name] = capture }
     }

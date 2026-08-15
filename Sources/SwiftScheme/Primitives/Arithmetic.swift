@@ -35,11 +35,11 @@ package func exactInteger(_ value: Value, _ context: String) throws -> BigInt {
   return rational.numerator
 }
 
-package func exactIntegerExponent(_ number: SchemeNumber) -> Int? {
+package func exactIntegerExponent(_ number: SchemeNumber) -> BigInt? {
   guard number.isExact, number.parts.imaginary.isZero,
     case .exact(let rational) = number.parts.real, rational.isInteger
   else { return nil }
-  return rational.numerator.exactInt
+  return rational.numerator
 }
 
 package func integerComponent(_ value: Value, _ context: String) throws -> (
@@ -150,24 +150,27 @@ package func complexExp(_ z: InexactComplex) -> InexactComplex {
   )
 }
 package func complexLog(_ z: InexactComplex) -> InexactComplex {
+  let real: Double
+  if z.real.isInfinite || z.imaginary.isInfinite {
+    real = .infinity
+  } else {
+    let scale = max(abs(z.real), abs(z.imaginary))
+    real =
+      scale == 0
+      ? -.infinity
+      : Foundation.log(scale)
+        + Foundation.log(Foundation.hypot(z.real / scale, z.imaginary / scale))
+  }
   let angle = Foundation.atan2(z.imaginary, z.real)
-  return InexactComplex(
-    real: Foundation.log(Foundation.hypot(z.real, z.imaginary)),
-    imaginary: angle == -.pi ? .pi : angle
-  )
+  return InexactComplex(real: real, imaginary: angle == -.pi ? .pi : angle)
 }
 package func complexMultiply(_ a: InexactComplex, _ b: InexactComplex) -> InexactComplex {
-  InexactComplex(
-    real: a.real * b.real - a.imaginary * b.imaginary,
-    imaginary: a.real * b.imaginary + a.imaginary * b.real
-  )
+  let result = SchemeNumber.inexactComplexProduct(a.real, a.imaginary, b.real, b.imaginary)
+  return InexactComplex(real: result.0, imaginary: result.1)
 }
 package func complexDivide(_ a: InexactComplex, _ b: InexactComplex) -> InexactComplex {
-  let d = b.real * b.real + b.imaginary * b.imaginary
-  return InexactComplex(
-    real: (a.real * b.real + a.imaginary * b.imaginary) / d,
-    imaginary: (a.imaginary * b.real - a.real * b.imaginary) / d
-  )
+  let result = SchemeNumber.inexactComplexQuotient(a.real, a.imaginary, b.real, b.imaginary)
+  return InexactComplex(real: result.0, imaginary: result.1)
 }
 package func fromComplex(_ z: InexactComplex) -> SchemeNumber {
   .rectangular(.inexact(z.real), .inexact(z.imaginary))
@@ -192,22 +195,148 @@ package func complexSqrt(_ number: SchemeNumber) -> SchemeNumber {
   }
   let z = inexactComplex(number)
   if z.imaginary == 0 && z.real >= 0 { return SchemeNumber(Foundation.sqrt(z.real)) }
-  let magnitude = Foundation.hypot(z.real, z.imaginary)
-  let real = Foundation.sqrt((magnitude + z.real) / 2)
-  let imaginary =
-    (z.imaginary.sign == .minus ? -1.0 : 1.0) * Foundation.sqrt((magnitude - z.real) / 2)
-  return fromComplex(InexactComplex(real: real, imaginary: imaginary))
+  if z.imaginary == 0 && z.real == -.infinity {
+    return fromComplex(InexactComplex(real: 0, imaginary: .infinity))
+  }
+  if z.real == .infinity {
+    if z.imaginary.isFinite {
+      return fromComplex(
+        InexactComplex(real: .infinity, imaginary: z.imaginary.sign == .minus ? -0.0 : 0.0)
+      )
+    }
+    return fromComplex(
+      InexactComplex(
+        real: .infinity,
+        imaginary: z.imaginary.sign == .minus ? -.infinity : .infinity
+      )
+    )
+  }
+  if z.real == -.infinity {
+    if z.imaginary.isFinite {
+      return fromComplex(
+        InexactComplex(real: 0, imaginary: z.imaginary.sign == .minus ? -.infinity : .infinity)
+      )
+    }
+    return fromComplex(
+      InexactComplex(
+        real: .infinity,
+        imaginary: z.imaginary.sign == .minus ? -.infinity : .infinity
+      )
+    )
+  }
+  if z.imaginary == .infinity {
+    return fromComplex(InexactComplex(real: .infinity, imaginary: .infinity))
+  }
+  if z.imaginary == -.infinity {
+    return fromComplex(InexactComplex(real: .infinity, imaginary: -.infinity))
+  }
+  if z.imaginary == 0 && z.real < 0 {
+    return fromComplex(InexactComplex(real: 0, imaginary: Foundation.sqrt(-z.real)))
+  }
+
+  let scale = max(abs(z.real), abs(z.imaginary))
+  guard scale > 0, scale.isFinite else {
+    return fromComplex(InexactComplex(real: .nan, imaginary: .nan))
+  }
+  let normalizedReal = z.real / scale
+  let normalizedImaginary = z.imaginary / scale
+  let radius = Foundation.hypot(normalizedReal, normalizedImaginary)
+  let rootReal: Double
+  let rootImaginary: Double
+  if normalizedReal >= 0 {
+    rootReal = Foundation.sqrt(0.5 * (radius + normalizedReal))
+    rootImaginary = normalizedImaginary / (2 * rootReal)
+  } else {
+    rootImaginary =
+      (normalizedImaginary.sign == .minus ? -1.0 : 1.0)
+      * Foundation.sqrt(0.5 * (radius - normalizedReal))
+    rootReal = abs(normalizedImaginary) / (2 * abs(rootImaginary))
+  }
+  let rootScale = Foundation.sqrt(scale)
+  return fromComplex(
+    InexactComplex(real: rootScale * rootReal, imaginary: rootScale * rootImaginary)
+  )
 }
+
+package func exactNegativeUnitHalfPower(_ base: SchemeNumber, _ exponent: SchemeNumber)
+  -> SchemeNumber?
+{
+  guard base.isExact, base.isReal, case .exact(let baseReal) = base.parts.real, baseReal.isInteger,
+    baseReal.numerator == -BigInt.one, exponent.isExact, exponent.parts.imaginary.isZero,
+    case .exact(let power) = exponent.parts.real, power.denominator == BigInt(2),
+    let magnitudeRemainder = try? power.numerator.magnitudeModulo(4)
+  else { return nil }
+  let remainder = power.numerator.signum < 0 ? (4 - magnitudeRemainder) % 4 : magnitudeRemainder
+  switch remainder {
+  case 0: return SchemeNumber.one
+  case 1: return .rectangular(.exact(.zero), .exact(.one))
+  case 2: return SchemeNumber(Int64(-1))
+  default: return .rectangular(.exact(.zero), .exact(Rational(-1)))
+  }
+}
+
+package func exactRationalPower(_ base: SchemeNumber, _ exponent: SchemeNumber) -> SchemeNumber? {
+  guard base.isExact, exponent.isExact, exponent.parts.imaginary.isZero,
+    case .exact(let power) = exponent.parts.real, let numerator = power.numerator.exactInt,
+    let denominator = power.denominator.exactInt, denominator > 1
+  else { return nil }
+  if denominator == 2 {
+    let root = complexSqrt(base)
+    guard root.isExact else { return nil }
+    return try? root.exactPower(numerator)
+  }
+  guard case .exact(let real) = base.parts.real, base.parts.imaginary.isZero,
+    !(denominator % 2 == 1 && real.signum < 0),
+    let rootNumerator = real.numerator.exactNthRoot(denominator),
+    let rootDenominator = real.denominator.exactNthRoot(denominator),
+    let root = Rational(rootNumerator, rootDenominator)
+  else { return nil }
+  return try? SchemeNumber(root).exactPower(numerator)
+}
+
 package func complexPower(_ base: SchemeNumber, _ exponent: SchemeNumber) -> SchemeNumber {
-  fromComplex(
+  if base.isReal, exponent.isReal {
+    let baseReal = base.parts.real.doubleValue
+    let exponentReal = exponent.parts.real.doubleValue
+    if baseReal == .infinity { return .real(.inexact(exponentReal > 0 ? .infinity : 0)) }
+    if baseReal == -.infinity, exponentReal.isFinite, exponentReal != 0 {
+      let magnitude: Double = exponentReal > 0 ? .infinity : 0
+      let doubled = exponentReal * 2
+      if doubled.isFinite, doubled.rounded() == doubled, doubled >= Double(Int.min),
+        doubled <= Double(Int.max)
+      {
+        let half = Int(doubled)
+        switch ((half % 4) + 4) % 4 {
+        case 0: return fromComplex(InexactComplex(real: magnitude, imaginary: 0))
+        case 1: return fromComplex(InexactComplex(real: 0, imaginary: magnitude))
+        case 2: return fromComplex(InexactComplex(real: -magnitude, imaginary: 0))
+        default: return fromComplex(InexactComplex(real: 0, imaginary: -magnitude))
+        }
+      }
+      let phase = Double.pi * exponentReal
+      return fromComplex(
+        InexactComplex(
+          real: magnitude * Foundation.cos(phase),
+          imaginary: magnitude * Foundation.sin(phase)
+        )
+      )
+    }
+    if baseReal > 0 { return .real(.inexact(Foundation.pow(baseReal, exponentReal))) }
+  }
+  return fromComplex(
     complexExp(complexMultiply(inexactComplex(exponent), complexLog(inexactComplex(base))))
   )
 }
 package func complexTranscendental(_ name: String, _ number: SchemeNumber) -> SchemeNumber {
   let parts = number.parts
-  if parts.imaginary.isZero, parts.real.doubleValue.isFinite {
+  if number.isReal {
     let real = parts.real.doubleValue
     switch name {
+    case "exp": return .real(.inexact(Foundation.exp(real)))
+    case "log" where real >= 0: return .real(.inexact(Foundation.log(real)))
+    case "sin": return .real(.inexact(Foundation.sin(real)))
+    case "cos": return .real(.inexact(Foundation.cos(real)))
+    case "tan": return .real(.inexact(Foundation.tan(real)))
     case "asin" where abs(real) <= 1: return .real(.inexact(Foundation.asin(real)))
     case "acos" where abs(real) <= 1: return .real(.inexact(Foundation.acos(real)))
     default: break
@@ -232,33 +361,97 @@ package func complexTranscendental(_ name: String, _ number: SchemeNumber) -> Sc
       InexactComplex(real: (a.real + b.real) / 2, imaginary: (a.imaginary + b.imaginary) / 2)
     )
   case "tan":
-    let s = complexTranscendental("sin", number)
-    let c = complexTranscendental("cos", number)
-    return fromComplex(complexDivide(inexactComplex(s), inexactComplex(c)))
+    let doubledReal = 2 * Foundation.remainder(z.real, Double.pi)
+    let doubledImaginary = 2 * z.imaginary
+    let decay = Foundation.exp(-abs(doubledImaginary))
+    if decay == 0 {
+      return fromComplex(
+        InexactComplex(real: 0, imaginary: doubledImaginary.sign == .minus ? -1.0 : 1.0)
+      )
+    }
+    let cosine = Foundation.cos(doubledReal)
+    let denominator = 1 + 2 * decay * cosine + decay * decay
+    return fromComplex(
+      InexactComplex(
+        real: 2 * decay * Foundation.sin(doubledReal) / denominator,
+        imaginary: (doubledImaginary.sign == .minus ? -1.0 : 1.0) * (1 - decay * decay)
+          / denominator
+      )
+    )
   case "asin":
-    let root = inexactComplex(
-      complexSqrt(
-        fromComplex(
-          InexactComplex(
-            real: 1 - z.real * z.real + z.imaginary * z.imaginary,
-            imaginary: -2 * z.real * z.imaginary
+    if z.imaginary == 0, z.real > 1 {
+      return fromComplex(InexactComplex(real: .pi / 2, imaginary: -Foundation.acosh(z.real)))
+    }
+    if z.imaginary == 0, z.real < -1 {
+      return fromComplex(InexactComplex(real: -.pi / 2, imaginary: Foundation.acosh(-z.real)))
+    }
+    let scale = max(abs(z.real), abs(z.imaginary))
+    let directLog: () -> InexactComplex = {
+      let square = complexMultiply(z, z)
+      let root = inexactComplex(
+        complexSqrt(
+          fromComplex(InexactComplex(real: 1 - square.real, imaginary: -square.imaginary))
+        )
+      )
+      return complexLog(
+        InexactComplex(real: root.real - z.imaginary, imaginary: root.imaginary + z.real)
+      )
+    }
+    let logged: InexactComplex
+    if scale > 1, scale <= 1e6 {
+      logged = directLog()
+    } else if scale > 1, scale.isFinite {
+      let normalizedReal = z.real / scale
+      let normalizedImaginary = z.imaginary / scale
+      let inverseScaleSquared =
+        scale <= Foundation.sqrt(Double.greatestFiniteMagnitude) ? 1 / (scale * scale) : 0
+      let square = InexactComplex(
+        real: normalizedReal * normalizedReal - normalizedImaginary * normalizedImaginary,
+        imaginary: 2 * normalizedReal * normalizedImaginary
+      )
+      let root = inexactComplex(
+        complexSqrt(
+          fromComplex(
+            InexactComplex(real: inverseScaleSquared - square.real, imaginary: -square.imaginary)
           )
         )
       )
-    )
-    let logged = complexLog(
-      InexactComplex(real: root.real - z.imaginary, imaginary: root.imaginary + z.real)
-    )
+      let argument = InexactComplex(
+        real: root.real - normalizedImaginary,
+        imaginary: root.imaginary + normalizedReal
+      )
+      if Foundation.hypot(argument.real, argument.imaginary) < 1e-14 {
+        let rootMagnitudeSquared = root.real * root.real + root.imaginary * root.imaginary
+        let correctionScale = 1 / scale / (2 * rootMagnitudeSquared)
+        logged = complexLog(
+          InexactComplex(
+            real: correctionScale * root.real,
+            imaginary: -correctionScale * root.imaginary
+          )
+        )
+      } else {
+        let normalizedLog = complexLog(argument)
+        logged = InexactComplex(
+          real: Foundation.log(scale) + normalizedLog.real,
+          imaginary: normalizedLog.imaginary
+        )
+      }
+    } else {
+      logged = directLog()
+    }
     return fromComplex(InexactComplex(real: logged.imaginary, imaginary: -logged.real))
   case "acos":
     let asin = inexactComplex(complexTranscendental("asin", number))
     return fromComplex(InexactComplex(real: Double.pi / 2 - asin.real, imaginary: -asin.imaginary))
   default:
-    let oneMinus = fromComplex(InexactComplex(real: 1 + z.imaginary, imaginary: -z.real))
-    let onePlus = fromComplex(InexactComplex(real: 1 - z.imaginary, imaginary: z.real))
-    let quotient = complexDivide(inexactComplex(oneMinus), inexactComplex(onePlus))
-    let logged = complexLog(quotient)
-    return fromComplex(InexactComplex(real: -logged.imaginary / 2, imaginary: logged.real / 2))
+    let oneMinus = complexLog(InexactComplex(real: 1 + z.imaginary, imaginary: -z.real))
+    let onePlus = complexLog(InexactComplex(real: 1 - z.imaginary, imaginary: z.real))
+    return fromComplex(
+      InexactComplex(
+        real: (onePlus.imaginary - oneMinus.imaginary) / 2,
+        imaginary: (oneMinus.real - onePlus.real) / 2
+      )
+    )
   }
 }
 

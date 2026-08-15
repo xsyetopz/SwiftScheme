@@ -9,6 +9,7 @@ extension Interpreter {
     var control = initial
     var continuation: Continuation = .halt
     var winds: [Wind] = []
+    defer { cleanupContinuation(continuation) }
 
     func scheduleTransition(_ actions: [WindAction], _ target: Captured, _ delivered: [Value]) -> (
       Control, Continuation
@@ -38,7 +39,7 @@ extension Interpreter {
     while true {
       switch control {
       case .expression(let rawExpression, let environment):
-        recordSymbols(rawExpression, in: environment)
+        try recordSymbols(rawExpression, in: environment)
         let expression = try expandMacros(rawExpression, in: environment)
         switch expression {
         case .symbol(let name): control = .values([try environment.get(name)])
@@ -157,17 +158,36 @@ extension Interpreter {
               let definitions = try syntaxBindings(form[1], keyword)
               try ensureDistinct(definitions, "\(keyword) binding")
               let body = Array(form.dropFirst(2))
-              let local = SchemeEnvironment(parent: environment)
-              let definitionEnvironment = keyword == "letrec-syntax" ? local : environment
+              let local = definitions.isEmpty ? environment : SchemeEnvironment(parent: environment)
+              let isRecursive = keyword == "letrec-syntax"
+              let definitionEnvironment = isRecursive ? local : environment
+              // R5RS letrec-syntax makes every transformer visible while all
+              // transformers are being constructed. Stable forward bindings
+              // preserve that visibility (including self/mutual recursion)
+              // without exposing an uninitialized value cell.
+              let forwards: [String: ForwardMacro] =
+                isRecursive
+                ? Dictionary(uniqueKeysWithValues: definitions.map { ($0.0, ForwardMacro()) }) : [:]
+              for (name, forward) in forwards { local.macros[name] = forward }
               for (name, spec) in definitions {
-                local.macros[name] = try SyntaxRules(
+                let transformer = try SyntaxRules(
                   keyword: name,
                   spec: spec,
                   definition: definitionEnvironment
                 )
+                if let forward = forwards[name] {
+                  forward.target = transformer
+                } else {
+                  local.macros[name] = transformer
+                }
+              }
+              // Empty syntax-binding groups still establish a body scope; Chibi's
+              // corpus relies on ordinary internal definitions there. Non-empty
+              // transformer groups retain expression-only body validation.
+              if !definitions.isEmpty {
+                try validateBody(body, context: keyword, in: local)
               }
               try prepareInternalDefinitions(body, in: local)
-              try validateBody(body, context: keyword, in: local)
               continuation = .beginFrame(Array(body.dropFirst()), local, true, continuation)
               control = .expression(body[0], local)
               continue
@@ -231,7 +251,7 @@ extension Interpreter {
               control = .expression(try expandCase(form, environment), environment)
               continue
             case "do":
-              control = .expression(try expandDo(form), environment)
+              control = .expression(try expandDo(form, environment), environment)
               continue
             case "quasiquote":
               try require(form, 2, "quasiquote")
@@ -278,6 +298,16 @@ extension Interpreter {
             continuation = .beginFrame(Array(rest.dropFirst()), environment, allowed, next)
             control = .expression(rest[0], environment)
           }
+        case .loadFrame(let source, let position, let environment, let next):
+          var reader = Reader(source, start: position)
+          guard let form = try reader.readOne() else {
+            continuation = next
+            control = .values([.unspecified])
+            break
+          }
+          noteReaderSpellings(reader)
+          continuation = .loadFrame(source, reader.index, environment, next)
+          control = .expression(form, environment)
         case .discardFrame(let next):
           continuation = next
           control = .values([.unspecified])

@@ -1,4 +1,3 @@
-import Foundation
 import SwiftSchemeNumeric
 
 package func schemeNumberValue(_ value: Value) -> SchemeNumber? {

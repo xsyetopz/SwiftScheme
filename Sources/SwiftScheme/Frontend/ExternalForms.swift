@@ -8,6 +8,7 @@ package struct Reader {
   package var index: Int
   private var line = 1
   private var column = 1
+  private var previousWasCarriageReturn = false
 
   package init(_ source: String, start: Int = 0) {
     self.init(scalarCharacters(source), start: start)
@@ -25,12 +26,19 @@ package struct Reader {
   {
     var line = 1
     var column = 1
+    var previousWasCarriageReturn = false
     for character in input[..<min(index, input.count)] {
-      if character == "\n" {
+      if character == "\r" {
         line += 1
         column = 1
+        previousWasCarriageReturn = true
+      } else if character == "\n" {
+        if !previousWasCarriageReturn { line += 1 }
+        column = 1
+        previousWasCarriageReturn = false
       } else {
         column += 1
+        previousWasCarriageReturn = false
       }
     }
     return (line, column)
@@ -55,11 +63,17 @@ package struct Reader {
     guard !isAtEnd else { return nil }
     let character = input[index]
     index += 1
-    if character == "\n" {
+    if character == "\r" {
       line += 1
       column = 1
+      previousWasCarriageReturn = true
+    } else if character == "\n" {
+      if !previousWasCarriageReturn { line += 1 }
+      column = 1
+      previousWasCarriageReturn = false
     } else {
       column += 1
+      previousWasCarriageReturn = false
     }
     return character
   }
@@ -69,7 +83,7 @@ package struct Reader {
       if character.isWhitespace {
         _ = advance()
       } else if character == ";" {
-        while let next = current, next != "\n" { _ = advance() }
+        while let next = current, next != "\n", next != "\r" { _ = advance() }
       } else {
         return
       }
@@ -143,11 +157,17 @@ package struct Reader {
         }
         _ = advance()
         skipSpace()
-        guard current != ")" && current != nil else {
+        if current == nil {
+          throw SchemeError.lexical("unexpected end of input", line: line, column: column)
+        }
+        guard current != ")" else {
           throw SchemeError.lexical("missing dotted-list tail", line: line, column: column)
         }
         let tail = try datum()
         skipSpace()
+        guard current != nil else {
+          throw SchemeError.lexical("unexpected end of input", line: line, column: column)
+        }
         guard current == ")" else {
           throw SchemeError.lexical("dotted list must have one tail", line: line, column: column)
         }
@@ -168,6 +188,9 @@ package struct Reader {
         }
         switch escaped {
         case "\"", "\\": result.append(escaped)
+        case "n": result.append("\n")
+        case "r": result.append("\r")
+        case "t": result.append("\t")
         default:
           throw SchemeError.lexical(
             "invalid string escape \\\(escaped)",
@@ -187,6 +210,7 @@ package struct Reader {
       throw SchemeError.lexical("incomplete character literal", line: line, column: column)
     }
     let tokenColumn = column - 1
+    guard first.isLetter else { return .character(first) }
     var token = String(first)
     while let character = current, !isDelimiter(character) {
       guard let next = advance() else { break }
@@ -196,14 +220,14 @@ package struct Reader {
     case "space": return .character(" ")
     case "newline": return .character("\n")
     default:
-      guard token.unicodeScalars.count == 1, let character = token.first else {
+      guard token.unicodeScalars.count == 1 else {
         throw SchemeError.lexical(
           "invalid character literal #\\\(token)",
           line: line,
           column: tokenColumn
         )
       }
-      return .character(character)
+      return .character(first)
     }
   }
 
@@ -283,6 +307,6 @@ package struct Reader {
 
   private func isDelimiter(_ character: Character?) -> Bool {
     guard let character else { return true }
-    return character.isWhitespace || ["(", ")", "\"", ";", "'", "`", ","].contains(character)
+    return character.isWhitespace || ["(", ")", "\"", ";"].contains(character)
   }
 }

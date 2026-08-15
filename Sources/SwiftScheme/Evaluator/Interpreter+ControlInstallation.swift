@@ -64,7 +64,7 @@ extension Interpreter {
       try require(args, 1, "open-input-file")
       do {
         return .port(
-          SchemePort(
+          try SchemePort(
             handle: try FileHandle(
               forReadingFrom: URL(
                 fileURLWithPath: try schemeString(args[0], "open-input-file").string
@@ -83,7 +83,7 @@ extension Interpreter {
       }
       do {
         return .port(
-          SchemePort(
+          try SchemePort(
             handle: try FileHandle(forWritingTo: URL(fileURLWithPath: path)),
             mode: .output
           )
@@ -117,8 +117,8 @@ extension Interpreter {
     }
     primitive("char-ready?", in: env) { [weak self] args in
       guard let self else { throw SchemeError.io("interpreter was reclaimed") }
-      _ = try inputPort(args, currentInput, "char-ready?")
-      return .boolean(true)
+      let port = try inputPort(args, currentInput, "char-ready?")
+      return .boolean(port.position < port.input.count || port.defaultInputReady)
     }
     primitive("write", in: env) { [weak self] args in
       guard let self else { throw SchemeError.io("interpreter was reclaimed") }

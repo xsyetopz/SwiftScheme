@@ -1,11 +1,15 @@
 import Foundation
 import SwiftSchemeNumeric
 
+private func sameScalarSpelling(_ lhs: String, _ rhs: String) -> Bool {
+  lhs.unicodeScalars.elementsEqual(rhs.unicodeScalars)
+}
+
 package func eq(_ lhs: Value, _ rhs: Value) -> Bool {
   switch (lhs, rhs) {
   case (.boolean(let a), .boolean(let b)): a == b
-  case (.character(let a), .character(let b)): a == b
-  case (.symbol(let a), .symbol(let b)): a == b
+  case (.character(let a), .character(let b)): sameScalarSpelling(String(a), String(b))
+  case (.symbol(let a), .symbol(let b)): sameScalarSpelling(a, b)
   case (.empty, .empty), (.eof, .eof): true
   case (.pair(let a), .pair(let b)): a === b
   case (.string(let a), .string(let b)): a === b
@@ -43,7 +47,10 @@ package func equal(_ lhs: Value, _ rhs: Value) -> Bool {
       guard x.elements.count == y.elements.count else { return false }
       let id = IdentityPair(left: ObjectIdentifier(x), right: ObjectIdentifier(y))
       if seen.insert(id).inserted { pending += zip(x.elements, y.elements) }
-    case (.string(let x), .string(let y)): if x.characters != y.characters { return false }
+    case (.string(let x), .string(let y)):
+      guard x.characters.count == y.characters.count,
+        zip(x.characters, y.characters).allSatisfy({ sameScalarSpelling(String($0), String($1)) })
+      else { return false }
     default: if !eqv(a, b) { return false }
     }
   }

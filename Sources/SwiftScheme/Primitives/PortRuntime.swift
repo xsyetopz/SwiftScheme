@@ -40,6 +40,7 @@ package func outputArguments(_ args: [Value], _ fallback: SchemePort, _ name: St
   )
 }
 package func emit(_ text: String, to port: SchemePort) throws {
+  guard !port.closed else { throw SchemeError.io("cannot write to a closed port") }
   if let sink = port.sink { try sink(text) } else { port.output += text }
 }
 package func closePortHandle(_ port: SchemePort) throws {

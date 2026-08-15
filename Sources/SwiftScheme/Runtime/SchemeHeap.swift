@@ -10,10 +10,15 @@ private final class WeakSchemeNode {
   init(_ value: any SchemeHeapNode) { self.value = value }
 }
 
+/// Snapshot of Scheme heap allocation and collection counters.
 public struct HeapStatistics: Equatable, Sendable {
+  /// Number of heap nodes allocated since initialization.
   public let allocated: Int
+  /// Number of heap nodes currently registered for tracing.
   public let registered: Int
+  /// Number of live nodes reachable from retained roots.
   public let live: Int
+  /// Number of nodes reclaimed by the most recent collection.
   public let collected: Int
 }
 
