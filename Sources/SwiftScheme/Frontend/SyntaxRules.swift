@@ -83,28 +83,31 @@ package final class SyntaxRules: SchemeMacro {
       throw SchemeError.syntax("transformer must be syntax-rules")
     }
     self.keyword = keyword
-    let literalIndex: Int
-    if case .symbol(let marker) = form[1] {
-      self.ellipsis = marker
-      literalIndex = 2
-    } else {
-      self.ellipsis = definition.cell("...") == nil && definition.macro("...") == nil ? "..." : nil
-      literalIndex = 1
+    self.ellipsis = "..."
+    guard form.count >= 2 else {
+      throw SchemeError.syntax("syntax-rules requires a literals list")
     }
-    guard form.count >= literalIndex + 2 else {
-      throw SchemeError.syntax("syntax-rules requires literals and rules")
+    let literalValues: [Value]
+    do {
+      literalValues = try array(from: form[1], context: "syntax-rules literals")
+    } catch {
+      throw SchemeError.syntax("syntax-rules literals must be a proper list")
     }
-    self.literals = Set(
-      try array(from: form[literalIndex], context: "syntax-rules literals").map {
-        try identifier($0, "syntax-rules literal")
-      }
-    )
-    self.rules = try form.dropFirst(literalIndex + 1).map {
+    let literalNames = try literalValues.map { try identifier($0, "syntax-rules literal") }
+    guard !literalNames.contains("...") else {
+      throw SchemeError.syntax("ellipsis cannot be a syntax-rules literal")
+    }
+    self.literals = Set(literalNames)
+    self.rules = try form.dropFirst(2).map {
       let rule = try array(from: $0, context: "syntax rule")
       guard rule.count == 2 else {
         throw SchemeError.syntax("syntax rule requires pattern and template")
       }
       return (rule[0], rule[1])
+    }
+    for (pattern, _) in rules {
+      var patternVariables = Set<String>()
+      try validatePattern(pattern, into: &patternVariables)
     }
     self.definition = definition
     for name in literals {
@@ -143,6 +146,89 @@ package final class SyntaxRules: SchemeMacro {
     literalBindings.removeAll()
     aliases.removeAll()
     introduced.removeAll()
+  }
+
+  private func validatePattern(_ pattern: Value, into variables: inout Set<String>) throws {
+    guard case .pair = pattern else {
+      throw SchemeError.syntax("syntax-rules pattern requires a keyword")
+    }
+    try validatePatternSequence(pattern, head: true, into: &variables)
+  }
+
+  private func validatePatternSequence(
+    _ value: Value,
+    head: Bool,
+    into variables: inout Set<String>
+  ) throws {
+    var cursor = value
+    var first = true
+    var previousWasPattern = false
+    while case .pair(let pair) = cursor {
+      if first && head {
+        guard case .symbol(let name) = pair.car, name != ellipsis else {
+          throw SchemeError.syntax("syntax-rules pattern requires a keyword")
+        }
+        try walkPattern(pair.car, head: true, into: &variables)
+      } else if isEllipsis(pair.car) {
+        guard previousWasPattern, case .empty = pair.cdr else {
+          throw SchemeError.syntax("ellipsis must terminate a nonempty pattern sequence")
+        }
+        previousWasPattern = false
+      } else {
+        try walkPattern(pair.car, head: false, into: &variables)
+        previousWasPattern = true
+      }
+      first = false
+      cursor = pair.cdr
+    }
+    if case .empty = cursor { return }
+    guard !isEllipsis(cursor) else {
+      throw SchemeError.syntax("ellipsis cannot be a dotted pattern tail")
+    }
+    try walkPattern(cursor, head: false, into: &variables)
+  }
+
+  private func isEllipsis(_ value: Value) -> Bool {
+    guard case .symbol(let name) = value else { return false }
+    return name == ellipsis
+  }
+
+  private func walkPattern(
+    _ value: Value,
+    head: Bool,
+    into variables: inout Set<String>
+  ) throws {
+    switch value {
+    case .symbol(let name):
+      guard !head, name != "_", !literals.contains(name), name != keyword, !isEllipsis(value)
+      else { return }
+      guard variables.insert(name).inserted else {
+        throw SchemeError.syntax("duplicate syntax-rules pattern variable \(name)")
+      }
+    case .pair:
+      try validatePatternSequence(value, head: false, into: &variables)
+    case .vector(let vector):
+      try validateVectorPatternSequence(vector.elements, into: &variables)
+    default: break
+    }
+  }
+
+  private func validateVectorPatternSequence(
+    _ elements: [Value],
+    into variables: inout Set<String>
+  ) throws {
+    var previousWasPattern = false
+    for (index, element) in elements.enumerated() {
+      if isEllipsis(element) {
+        guard previousWasPattern, index == elements.index(before: elements.endIndex) else {
+          throw SchemeError.syntax("ellipsis must terminate a nonempty pattern sequence")
+        }
+        previousWasPattern = false
+      } else {
+        try walkPattern(element, head: false, into: &variables)
+        previousWasPattern = true
+      }
+    }
   }
 
   private func freeIdentifiers() -> Set<String> {

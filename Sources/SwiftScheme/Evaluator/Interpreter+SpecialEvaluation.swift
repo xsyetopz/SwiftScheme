@@ -57,6 +57,13 @@ extension Interpreter {
       guard case .environment(let environment) = arguments[1] else {
         throw SchemeError.type("eval expects an environment")
       }
+      if case .pair(let form) = arguments[0], case .symbol(let keyword) = form.car,
+        (keyword == "define" || keyword == "define-syntax"), environment.cell(keyword) == nil,
+        environment.macro(keyword) == nil
+      {
+        try environment.requireDefinitionAllowed()
+        throw SchemeError.syntax("eval expects an expression")
+      }
       control = .expression(arguments[0], environment)
     case .map, .forEach:
       guard arguments.count >= 2 else {

@@ -27,7 +27,9 @@ extension Interpreter {
       guard let first = args.first else { throw SchemeError.arity("/ expects at least 1 argument") }
       var result = args.count == 1 ? SchemeNumber.one : try schemeNumber(first)
       for value in args.count == 1 ? args[...] : args.dropFirst() {
-        do { result = try result / schemeNumber(value) } catch {
+        do {
+          result = try result / schemeNumber(value)
+        } catch BigIntError.divisionByZero {
           throw SchemeError.numeric("division by zero")
         }
       }
@@ -82,11 +84,9 @@ extension Interpreter {
     primitive("abs", in: env) { args in
       try require(args, 1, "abs")
       let n = try schemeNumber(args[0])
-      if n.isReal {
-        let r = n.parts.real
-        return numberValue(.real(r.signum < 0 ? -r : r))
-      }
-      return .real(n.magnitude)
+      guard n.isReal else { throw SchemeError.type("abs expects a real number") }
+      let r = n.parts.real
+      return numberValue(.real(r.signum < 0 ? -r : r))
     }
     for name in ["max", "min"] {
       primitive(name, in: env) { args in

@@ -192,6 +192,15 @@ package func complexPower(_ base: SchemeNumber, _ exponent: SchemeNumber) -> Sch
   )
 }
 package func complexTranscendental(_ name: String, _ number: SchemeNumber) -> SchemeNumber {
+  let parts = number.parts
+  if parts.imaginary.isZero, parts.real.doubleValue.isFinite {
+    let real = parts.real.doubleValue
+    switch name {
+    case "asin" where abs(real) <= 1: return .real(.inexact(Foundation.asin(real)))
+    case "acos" where abs(real) <= 1: return .real(.inexact(Foundation.acos(real)))
+    default: break
+    }
+  }
   let z = inexactComplex(number)
   let iZ = InexactComplex(real: -z.imaginary, imaginary: z.real)
   let minusIZ = InexactComplex(real: z.imaginary, imaginary: -z.real)

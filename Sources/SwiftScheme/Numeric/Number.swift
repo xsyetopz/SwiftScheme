@@ -254,7 +254,8 @@ public enum SchemeNumber: Hashable, Sendable, CustomStringConvertible {
     case .real(let value): return Self.describe(value)
     case .complex(let real, let imaginary):
       let imaginaryText = Self.describe(imaginary)
-      return Self.describe(real) + (imaginary.signum >= 0 ? "+" : "") + imaginaryText + "i"
+      let separator = imaginaryText.hasPrefix("-") || imaginaryText.hasPrefix("+") ? "" : "+"
+      return Self.describe(real) + separator + imaginaryText + "i"
     }
   }
 
@@ -279,7 +280,8 @@ public enum SchemeNumber: Hashable, Sendable, CustomStringConvertible {
     case .real(let value): return component(value)
     case .complex(let real, let imaginary):
       guard let a = component(real), let b = component(imaginary) else { return nil }
-      return a + (imaginary.signum >= 0 ? "+" : "") + b + "i"
+      let separator = b.hasPrefix("-") || b.hasPrefix("+") ? "" : "+"
+      return a + separator + b + "i"
     }
   }
 

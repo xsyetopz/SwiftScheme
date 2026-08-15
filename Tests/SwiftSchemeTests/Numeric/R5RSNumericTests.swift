@@ -14,6 +14,31 @@ import Testing
 }
 
 @Suite("R5RS §7.1.1 numeric and external-form grammar") struct R5RSNumericTests {
+  @Test("abs accepts real numbers and rejects complex numbers") @MainActor
+  func absDomain() throws {
+    #expect(try r5rsEvaluate("(abs -3)").written == "3")
+    #expect(try r5rsEvaluate("(abs -3.5)").written == "3.5")
+    try r5rsExpectError("(abs 1+2i)", "abs complex domain")
+    do {
+      _ = try r5rsEvaluate("(/ 1 #t)")
+      #expect(Bool(false), "division type error: expected SchemeError")
+    } catch let error as SchemeError {
+      #expect(error.description.contains("expected number"))
+    }
+  }
+
+  @Test("numeric external representations preserve complex signs and specials") @MainActor
+  func numericExternalBoundaries() throws {
+    #expect(try r5rsEvaluate("(number->string 1-0.0i)").written == "\"1-0.0i\"")
+    #expect(try r5rsEvaluate("(string->number (number->string 1-0.0i))").written == "1-0.0i")
+    #expect(try r5rsEvaluate("(string->number (number->string +inf.0))").written == "+inf.0")
+    #expect(try r5rsEvaluate("(string->number (number->string +nan.0))").written == "+nan.0")
+    #expect(
+      try r5rsEvaluate("(number->string (string->number \"1+nan.0i\"))").written
+        == "\"1+nan.0i\""
+    )
+  }
+
   @Test("radix placeholders are accepted and remain inexact") @MainActor func radixPlaceholders()
     throws
   {
@@ -213,6 +238,12 @@ import Testing
       """
     )
     #expect(result.written == "#t")
+  }
+
+  @Test("asin and acos keep real arguments in their real domain") @MainActor
+  func inverseTrigRealDomain() throws {
+    #expect(try r5rsEvaluate("(number->string (asin 0.5))").written == "\"0.5235987755982988\"")
+    #expect(try r5rsEvaluate("(number->string (acos 0.5))").written == "\"1.0471975511965976\"")
   }
 
   @Test("real transcendental overflow retains a real external form") @MainActor

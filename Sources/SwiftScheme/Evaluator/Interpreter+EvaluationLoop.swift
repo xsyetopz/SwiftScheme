@@ -139,11 +139,15 @@ extension Interpreter {
               guard !isDefinitionBoundaryKeyword(name) else {
                 throw SchemeError.syntax("cannot define syntactic keyword \(name)")
               }
-              environment.macros[name] = try SyntaxRules(
+              let transformer = try SyntaxRules(
                 keyword: name,
                 spec: form[2],
                 definition: environment
               )
+              // A syntax binding at this scope supersedes an existing value
+              // binding; a later value definition can shadow it again.
+              environment.values.removeValue(forKey: name)
+              environment.macros[name] = transformer
               control = .values([.unspecified])
               continue
             case "let-syntax", "letrec-syntax":
@@ -354,7 +358,8 @@ extension Interpreter {
             control = .values(values)
           }
         case .windBeforeFrame(let thunk, let after, let wind, let next):
-          _ = try one(values, "dynamic-wind before thunk")
+          // R5RS ignores every value produced by before.  It is not an
+          // ordinary value context (and may legally produce zero or many).
           winds.append(wind)
           continuation = .windBodyFrame(wind, after, next)
           control = .apply(thunk, [])
@@ -364,23 +369,29 @@ extension Interpreter {
           continuation = .windAfterFrame(delivered, next)
           control = .apply(after, [])
         case .windAfterFrame(let delivered, let next):
-          _ = try one(values, "dynamic-wind after thunk")
+          // R5RS ignores every value produced by after as well.
           continuation = next
           control = .values(delivered)
         case .transitionFrame(let actions, let target, let delivered):
-          _ = try one(values, "dynamic-wind thunk")
+          // Dynamic-wind transition hooks are effect-only; discard all of
+          // the values returned by each before/after procedure.
           let scheduled = scheduleTransition(actions, target, delivered)!
           control = scheduled.0
           continuation = scheduled.1
         case .enteredFrame(let wind, let actions, let target, let delivered):
-          _ = try one(values, "dynamic-wind before thunk")
           winds.append(wind)
           let scheduled = scheduleTransition(actions, target, delivered)!
           control = scheduled.0
           continuation = scheduled.1
         case .mapFrame(let procedure, let lists, let index, let results, let each, let next):
-          let value = try one(values, each ? "for-each procedure" : "map procedure")
-          let accumulated = each ? results : results + [value]
+          // map requires one result per element, while for-each discards
+          // every result from its effect-only procedure.
+          let accumulated: [Value]
+          if each {
+            accumulated = results
+          } else {
+            accumulated = results + [try one(values, "map procedure")]
+          }
           let following = index + 1
           if following == lists[0].count {
             continuation = next

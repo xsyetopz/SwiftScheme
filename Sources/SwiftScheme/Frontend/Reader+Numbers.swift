@@ -37,6 +37,14 @@ extension Reader {
       token.removeFirst(2)
     }
     guard !token.isEmpty else { return nil }
+    if !radixSeen, exactness != .exact {
+      switch token {
+      case "+inf.0": return .real(Double.infinity)
+      case "-inf.0": return .real(-Double.infinity)
+      case "+nan.0", "-nan.0": return .real(Double.nan)
+      default: break
+      }
+    }
     guard let parsed = parseComplex(token, radix: radix, exactness: exactness) else { return nil }
     return value(from: parsed)
   }
@@ -117,6 +125,13 @@ extension Reader {
   func parseUnsignedReal(_ text: String, radix: Int, exactness: NumericExactness) -> RealComponent?
   {
     guard !text.isEmpty else { return nil }
+    if radix == 10, exactness != .exact {
+      switch text {
+      case "inf.0": return .inexact(Double.infinity)
+      case "nan.0": return .inexact(Double.nan)
+      default: break
+      }
+    }
     let slashParts = text.split(separator: "/", omittingEmptySubsequences: false)
     if text.contains("/") {
       guard slashParts.count == 2,

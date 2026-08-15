@@ -337,7 +337,7 @@ extension Interpreter {
   }
 
   func expandCase(_ form: [Value], _ environment: SchemeEnvironment) throws -> Value {
-    guard form.count >= 3 else { throw SchemeError.syntax("case requires key and clauses") }
+    guard form.count >= 2 else { throw SchemeError.syntax("case requires a key") }
     macroSerial += 1
     let key = internalTemporary("case#\(macroSerial)")
     var seenDatums: [Value] = []

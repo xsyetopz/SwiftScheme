@@ -51,6 +51,28 @@ struct R5RSDerivedControlTests {
     expectDerivedError("(do ((x 0) (x 1)) ((= x 0) x))", "duplicate do variable")
   }
 
+  @Test("case permits no clauses and rejects duplicate datums") func caseGrammarBoundaries() throws {
+    #expect(try evaluateDerived("(case 1)").written == "#<unspecified>")
+    expectDerivedError("(case 1 ((1 1) 'ok))", "duplicate case datum")
+  }
+
+  @Test("dynamic-wind discards all before and after values") func dynamicWindHookValues() throws {
+    let result = try evaluateDerived(
+      "(dynamic-wind (lambda () (values 1 2)) "
+        + "(lambda () 42) (lambda () (values 3 4)))"
+    )
+    #expect(result.written == "42")
+  }
+
+  @Test("for-each discards all procedure values") func forEachProcedureValues() throws {
+    let result = try evaluateDerived(
+      "(call-with-output-string (lambda (p) "
+        + "(for-each (lambda (x) (values x (+ x 1))) '(1 2)) "
+        + "(display (symbol->string 'done) p)))"
+    )
+    #expect(result.written == "\"done\"")
+  }
+
   @Test("map and for-each validate procedures on empty lists") func emptyListProcedureDomains() {
     expectDerivedError("(map 1 '())", "map procedure")
     expectDerivedError("(for-each 1 '())", "for-each procedure")
@@ -59,6 +81,7 @@ struct R5RSDerivedControlTests {
   @Test("R5RS §6.5 eval rejects non-expression data") func evalExpressionDomains() {
     expectDerivedError("(eval '() (null-environment 5))", "eval empty list")
     expectDerivedError("(eval '#(1 2) (null-environment 5))", "eval vector datum")
+    expectDerivedError("(eval '(define eval-leak 1) (interaction-environment))", "eval definition")
     expectDerivedError("()", "empty application")
     expectDerivedError("#(1 2)", "vector expression")
   }

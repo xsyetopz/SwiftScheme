@@ -14,6 +14,45 @@ import Testing
 }
 
 @Suite("R5RS §4.3 and §5 definition/macro grammar") @MainActor struct R5RSMacroDefinitionTests {
+  @Test("top-level syntax bindings shadow existing value bindings") func syntaxShadowsValue() throws {
+    let interpreter = Interpreter(output: { _ in })
+    _ = try interpreter.evaluate(
+      "(define-syntax + (syntax-rules () ((+ left right) left)))"
+    )
+    #expect(try interpreter.evaluate("(+ 20 22)").written == "20")
+  }
+
+  @Test("syntax-rules rejects repeated pattern variables and custom ellipses")
+  func malformedSyntaxRules() {
+    expectR5RSyntaxError(
+      "(define-syntax same (syntax-rules () ((same value value) value)))",
+      "repeated pattern variable"
+    )
+    expectR5RSyntaxError(
+      "(define-syntax custom (syntax-rules dots () ((custom value dots) value)))",
+      "custom ellipsis"
+    )
+    expectR5RSyntaxError(
+      "(define-syntax invalid (syntax-rules (...) ((invalid value) value)))",
+      "ellipsis literal"
+    )
+    expectR5RSyntaxError(
+      "(define-syntax malformed (syntax-rules () ((malformed ... value) value)))",
+      "leading ellipsis"
+    )
+    expectR5RSyntaxError(
+      "(define-syntax malformed (syntax-rules () ((malformed value ... value) value)))",
+      "non-final ellipsis"
+    )
+  }
+
+  @Test("syntax-rules permits an empty rule set") func emptySyntaxRules() {
+    expectR5RSyntaxError(
+      "(define-syntax never (syntax-rules ())) (never)",
+      "empty syntax-rules transformer"
+    )
+  }
+
   @Test("syntax-rules transcribes dotted templates") func dottedTemplate() throws {
     let interpreter = Interpreter(output: { _ in })
     let result = try interpreter.evaluate(
