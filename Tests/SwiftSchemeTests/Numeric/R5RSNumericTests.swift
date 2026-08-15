@@ -35,6 +35,56 @@ import Testing
     )
   }
 
+  @Test("exact unit bases preserve arbitrary exact exponents") @MainActor
+  func arbitraryExactExponents() throws {
+    let cases = [
+      ("(expt 1 9223372036854775808)", "1"), ("(expt 1 1/9223372036854775808)", "1"),
+      ("(expt -1 9223372036854775808)", "1"), ("(expt -1 -9223372036854775808)", "1"),
+      ("(expt -1 18446744073709551617/2)", "0+1i"),
+    ]
+    for (source, expected) in cases {
+      #expect(try r5rsEvaluate(source).written == expected)
+      #expect(try r5rsEvaluate("(exact? \(source))").written == "#t")
+    }
+    try r5rsExpectError("(expt 2 9223372036854775808)", "unrepresentable exact exponent")
+    try r5rsExpectError("(expt 2 -9223372036854775808)", "minimum exact exponent")
+  }
+
+  @Test("exact rational accessors normalize signs and reject zero denominators") @MainActor
+  func rationalAccessorBoundaries() throws {
+    let result = try r5rsEvaluate(
+      "(list (/ 6 -4) (numerator -3/2) (denominator -3/2) "
+        + "(denominator (exact->inexact 3/2)) (string->number \"1/0\") "
+        + "(string->number \"1/-2\"))"
+    )
+    #expect(result.written == "(-3/2 -3 2 2.0 #f #f)")
+  }
+
+  @Test("numeric tower predicates distinguish exactness and finite real values") @MainActor
+  func numericPredicateCrossProduct() throws {
+    let result = try r5rsEvaluate(
+      "(list (number? 1+2i) (complex? 1) (real? 1+0.0i) "
+        + "(rational? 1.0) (rational? +inf.0) (integer? 3.0) "
+        + "(integer? 3.5) (exact? 1+2i) (inexact? 1+2.0i))"
+    )
+    #expect(result.written == "(#t #t #t #t #f #t #f #t #t)")
+  }
+
+  @Test("complex constructors and accessors preserve principal values") @MainActor
+  func complexConstructionAccessors() throws {
+    let result = try r5rsEvaluate(
+      "(list (make-rectangular 3 4) (real-part 3+4i) (imag-part 3+4i) "
+        + "(magnitude 3+4i) (real-part (make-polar 2 0)) " + "(complex? (make-polar 2 1/2)) "
+        + "(= (angle -1) 3.141592653589793))"
+    )
+    #expect(result.written == "(3+4i 3 4 5 2 #t #t)")
+  }
+
+  @Test("positive and negative predicates reject NaN") @MainActor func nanSignPredicates() throws {
+    let result = try r5rsEvaluate("(list (positive? +nan.0) (negative? +nan.0))")
+    #expect(result.written == "(#f #f)")
+  }
+
   @Test("radix placeholders are accepted and remain inexact") @MainActor func radixPlaceholders()
     throws
   {
@@ -141,7 +191,7 @@ import Testing
   @Test("rationalize accepts zero tolerance and rejects negative or non-real tolerance") @MainActor
   func rationalizeToleranceBoundaries() throws {
     let zeroTolerance: [(expression: String, written: String)] = [
-      ("(rationalize 1 0)", "1"), ("(rationalize -1 0)", "-1"), ("(rationalize 1 0.0)", "1.0")
+      ("(rationalize 1 0)", "1"), ("(rationalize -1 0)", "-1"), ("(rationalize 1 0.0)", "1.0"),
     ]
     for item in zeroTolerance { #expect(try r5rsEvaluate(item.expression).written == item.written) }
 
@@ -180,6 +230,111 @@ import Testing
     #expect(result.written == "(3/2 1.5 #f #f 3/2)")
   }
 
+  @Test("principal square root handles negative infinity") @MainActor
+  func squareRootNegativeInfinity() throws {
+    #expect(try r5rsEvaluate("(number->string (sqrt -inf.0))").written == "\"0.0+inf.0i\"")
+    #expect(try r5rsEvaluate("(number->string (sqrt -inf.0-0.0i))").written == "\"0.0+inf.0i\"")
+    #expect(try r5rsEvaluate("(number->string (sqrt -4.0-0.0i))").written == "\"0.0+2.0i\"")
+    #expect(
+      try r5rsEvaluate("(number->string (sqrt -1-2i))").written
+        == "\"0.7861513777574233-1.272019649514069i\""
+    )
+  }
+
+  @Test("infinite powers preserve real and principal complex limits") @MainActor
+  func infinitePowerBranches() throws {
+    let result = try r5rsEvaluate(
+      "(list (number->string (expt +inf.0 -2)) " + "(number->string (expt -inf.0 0.5)) "
+        + "(number->string (expt -inf.0 1.5)))"
+    )
+    #expect(result.written == "(\"0.0\" \"0.0+inf.0i\" \"0.0-inf.0i\")")
+  }
+
+  @Test("complex atan preserves principal branch signs") @MainActor func complexAtanBranches()
+    throws
+  {
+    #expect(
+      try r5rsEvaluate("(number->string (atan +2i))").written
+        == "\"1.5707963267948966+0.5493061443340549i\""
+    )
+    #expect(
+      try r5rsEvaluate("(number->string (atan -2i))").written
+        == "\"-1.5707963267948966-0.5493061443340549i\""
+    )
+    #expect(
+      try r5rsEvaluate("(number->string (asin 2+0.1i))").written
+        == "\"1.5131571227434844+1.3188765472108999i\""
+    )
+  }
+
+  @Test("finite complex branches avoid avoidable binary64 overflow") @MainActor
+  func stableComplexBranches() throws {
+    let result = try r5rsEvaluate(
+      """
+      (list (number->string (sqrt 1e308+1e308i))
+            (number->string (log 1.7976931348623157e308+1.7976931348623157e308i))
+            (number->string (tan 1e308+1e308i))
+            (number->string (/ 1.0+1.0i 1e308+1e308i))
+            (number->string (/ 1e308+1e308i 1e-308+1e-308i))
+            (number->string (expt 1e308+1e308i 2))
+            (number->string (asin 1e8+1e8i)))
+      """
+    )
+    #expect(
+      result.written == "(\"1.0986841134678101e+154+4.5508986056222734e+153i\" "
+        + "\"710.1292864836639+0.7853981633974483i\" "
+        + "\"0.0+1.0i\" \"1.0e-308+0.0i\" \"+inf.0+0.0i\" "
+        + "\"0.0+inf.0i\" \"0.7853981633974483+19.46040151479228i\")"
+    )
+  }
+
+  @Test("complex division keeps zero numerators zero when denominator products underflow")
+  @MainActor func stableComplexZeroQuotient() throws {
+    #expect(
+      try r5rsEvaluate("(number->string (/ 0.0+0.0i 1e-308+1e-308i))").written == "\"0.0+0.0i\""
+    )
+    #expect(
+      try r5rsEvaluate("(number->string (/ -0.0-0.0i 1e-308+1e-308i))").written == "\"-0.0-0.0i\""
+    )
+  }
+
+  @Test("real-valued complex literals stay in real transcendental domains") @MainActor
+  func realComplexTranscendentalDomain() throws {
+    let result = try r5rsEvaluate(
+      "(list (number->string (sin 1+0i)) " + "(number->string (log 1+0i)) " + "(real? (log -1+0i)))"
+    )
+    #expect(result.written == "(\"0.8414709848078965\" \"0.0\" #f)")
+  }
+
+  @Test("make-polar preserves inexactness from a zero angle") @MainActor
+  func polarZeroAngleExactness() throws {
+    #expect(try r5rsEvaluate("(exact? (make-polar 1 0))").written == "#t")
+    #expect(try r5rsEvaluate("(exact? (make-polar 1 0.0))").written == "#f")
+  }
+
+  @Test("inexact integer powers preserve known real domains") @MainActor
+  func inexactIntegerPowersStayReal() throws {
+    let result = try r5rsEvaluate(
+      "(list (real? (expt -8 2.0)) (number->string (expt -8 2.0)) "
+        + "(real? (expt -8 1.0)) (number->string (expt -8 1.0)))"
+    )
+    #expect(result.written == "(#t \"64.0\" #t \"-8.0\")")
+  }
+
+  @Test("string->number skips atmosphere before radix and exactness prefixes") @MainActor
+  func stringNumberSkipsLeadingAtmosphere() throws {
+    let result = try r5rsEvaluate(
+      """
+      (list (string->number " 11" 2)
+            (string->number " #x1" 2)
+            (string->number " #e11" 2)
+            (string->number ";comment
+      11" 2))
+      """
+    )
+    #expect(result.written == "(3 1 3 3)")
+  }
+
   @Test("finite inexact number->string values round-trip in non-decimal radices") @MainActor
   func numberStringFiniteInexactNonDecimalRoundTrips() throws {
     let result = try r5rsEvaluate(
@@ -210,6 +365,20 @@ import Testing
     #expect(result.written == "((#t #t) (#t #t) (#t #t) (#t #t) (#t #t) (#t #t))")
   }
 
+  @Test("decimal inexact number->string output keeps a decimal point in exponent form") @MainActor
+  func numberStringScientificFiniteValues() throws {
+    let result = try r5rsEvaluate(
+      "(let ((roundtrip (lambda (value) " + "(let ((text (number->string value))) "
+        + "(list text (eqv? value (string->number text))))))) "
+        + "(list (roundtrip 1e20) (roundtrip 1e-5) "
+        + "(roundtrip 5e-324) (roundtrip -1.7976931348623157e308)))"
+    )
+    #expect(
+      result.written == "((\"1.0e+20\" #t) (\"1.0e-05\" #t) "
+        + "(\"5.0e-324\" #t) (\"-1.7976931348623157e+308\" #t))"
+    )
+  }
+
   @Test("exact->inexact rounds large integers to the nearest binary64 value") @MainActor
   func exactToInexactRoundsLargeIntegers() throws {
     let result = try r5rsEvaluate(
@@ -236,10 +405,13 @@ import Testing
     #expect(result.written == "#t")
   }
 
-  @Test("asin and acos keep real arguments in their real domain") @MainActor
+  @Test("inverse trigonometric functions keep real arguments in their real domain") @MainActor
   func inverseTrigRealDomain() throws {
     #expect(try r5rsEvaluate("(number->string (asin 0.5))").written == "\"0.5235987755982988\"")
     #expect(try r5rsEvaluate("(number->string (acos 0.5))").written == "\"1.0471975511965976\"")
+    #expect(try r5rsEvaluate("(real? (atan 0.1))").written == "#t")
+    #expect(try r5rsEvaluate("(number->string (atan 0.1))").written == "\"0.09966865249116204\"")
+    #expect(try r5rsEvaluate("(number->string (atan +inf.0))").written == "\"1.5707963267948966\"")
   }
 
   @Test("real transcendental overflow retains a real external form") @MainActor
@@ -278,9 +450,10 @@ import Testing
 
   @Test("malformed numeric-looking tokens fail without rejecting valid identifiers") @MainActor
   func invalidVersusSymbolDiagnostics() throws {
-    for token in ["+foo", "-foo", ".foo", ".", "..", "...foo", "@", "foo#bar", "foo\\bar", "λ"] {
-      try r5rsExpectError(token, token)
-    }
+    for token in [
+      "+foo", "-foo", ".foo", ".", "..", "...foo", "@", "foo#bar", "foo\\bar", "λ", "a'b", "a`b",
+      "a,b",
+    ] { try r5rsExpectError(token, token) }
     for token in ["+", "-", "...", "foo+bar", "foo-bar", "foo.bar", "foo@bar", "!", "_"] {
       let value = try r5rsEvaluate("'\(token)")
       if case .symbol = value {
@@ -303,8 +476,10 @@ import Testing
     let escapedValue = try r5rsEvaluate(escaped)
     #expect(escapedValue.written == escaped)
 
-    for escape in ["n", "r", "t", "a"] {
-      try r5rsExpectError("\"bad\\\(escape)escape\"", "\\\(escape) escape")
+    for escape in ["n", "r", "t"] {
+      let value = try r5rsEvaluate("\"bad\\\(escape)escape\"")
+      #expect(value.written == "\"bad" + String([escape == "n" ? "\n" : escape == "r" ? "\r" : "\t"]) + "escape\"")
     }
+    try r5rsExpectError("\"bad\\aescape\"", "\\a escape")
   }
 }

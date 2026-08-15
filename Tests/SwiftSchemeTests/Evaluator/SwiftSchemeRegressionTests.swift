@@ -28,6 +28,12 @@ import Testing
       "lexical forms"
     )
     try expect("'#(a #\\b \"c\")", "#(a #\\b \"c\")", "vector reader/writer")
+    try expect(
+      "(let ((s (string->symbol \"Foo\"))) "
+        + "(eval (list (list 'lambda (list s) s) 42) (interaction-environment)))",
+      "42",
+      "string-created symbol eval binding"
+    )
     try expectError("(a . b c)", "bad dotted list")
     try expectError("\"unterminated", "unterminated string")
 
@@ -283,6 +289,15 @@ import Testing
         + "(flatten (() (1) ()))",
       "(1)",
       "nested syntax-rules empty repetitions"
+    )
+    try expect(
+      """
+      (let ((x 'definition))
+        (let-syntax ((literal-reference (syntax-rules (x) ((literal-reference) x))))
+          (let ((x 'use)) (literal-reference))))
+      """,
+      "definition",
+      "syntax-rules literal template binding"
     )
     try expect(
       """

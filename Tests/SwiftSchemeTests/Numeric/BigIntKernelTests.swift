@@ -138,6 +138,14 @@ func runBigIntKernelChecks() throws {
   expect((-BigInt(-9)) == BigInt(9), "unary sign")
   expect(BigInt(1).doubleValue == 1.0 && BigInt(-1).doubleValue == -1.0, "Double conversion")
   expect(BigInt(Int64.max).exactInt == Int(exactly: Int64.max), "exact Int conversion")
+  expect(
+    Rational.exactDecimal(significand: BigInt(1), fractionalDigits: 0, exponent: Int.min) == nil,
+    "exact decimal exponent overflow"
+  )
+  expect(
+    Rational.exactDecimal(significand: BigInt(1), fractionalDigits: -1, exponent: 0) == nil,
+    "exact decimal fractional digit domain"
+  )
 
   do {
     _ = try a.quotient(dividingBy: .zero)

@@ -26,6 +26,14 @@ test *args:
 test-release:
     {{ swift_env }} {{ swift }} test --configuration release --parallel
 
+# Run checked-in Scheme fixtures and compare captured stdout byte-for-byte.
+fixtures:
+    python3 Scripts/run-fixtures.py
+
+# Run every R5RS-focused Swift Testing suite.
+r5rs:
+    {{ swift_env }} {{ swift }} test --parallel --filter R5RS
+
 # Collect SwiftPM code-coverage data.
 coverage:
     {{ swift_env }} {{ swift }} test --enable-code-coverage
@@ -50,10 +58,6 @@ lint:
 lint-fix:
     {{ swift_env }} {{ swiftlint }} lint --config .swiftlint.yml --fix
 
-# Verify the SwiftPM target DAG, extension naming, and file-size limits.
-architecture:
-    python3 Scripts/check-architecture.py
-
 # Detect substantial copy-paste duplication in production and test code.
 duplication:
     npx --yes jscpd --reporters ai --min-tokens 100 Sources/SwiftScheme
@@ -62,7 +66,7 @@ duplication:
 fix: format lint-fix
 
 # Run the complete local quality gate without mutating files.
-check: build test lint format-check architecture duplication
+check: build test lint format-check architecture duplication fixtures
 
 # Run the CLI with a small deterministic smoke program.
 smoke: build

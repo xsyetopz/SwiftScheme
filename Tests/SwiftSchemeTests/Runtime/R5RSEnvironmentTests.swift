@@ -56,6 +56,18 @@ import Testing
     #expect(try interpreter.evaluate("(eval '(+ 20 22) r5rs-target)").written == "42")
   }
 
+  @Test("scheme-report-environment exposes every required procedure")
+  func reportEnvironmentRequiredInventory() throws {
+    let interpreter = Interpreter { _ in }
+    _ = try interpreter.evaluate("(define r5rs-target (scheme-report-environment 5))")
+    for name in Set(r5rsRequiredProcedureNames) {
+      #expect(
+        try interpreter.evaluate("(procedure? (eval '\(name) r5rs-target))").written == "#t",
+        "report environment is missing required procedure: \(name)"
+      )
+    }
+  }
+
   @Test("null-environment preserves syntax and literal evaluation")
   func nullEnvironmentEvaluatesExpressions() throws {
     let interpreter = Interpreter { _ in }
@@ -76,6 +88,7 @@ import Testing
     #expect(try interpreter.evaluate("(eval 'values r5rs-target)").written == "#<procedure>")
     #expect(try interpreter.evaluate("(eval 'input-port? r5rs-target)").written == "#<procedure>")
     #expect(try interpreter.evaluate("(eval 'port? r5rs-target)").written == "#<procedure>")
+    #expect(try interpreter.evaluate("(eval '(cdddr '(a b c d)) r5rs-target)").written == "(d)")
   }
 
   @Test("scheme-report-environment rejects value definitions without a binding")

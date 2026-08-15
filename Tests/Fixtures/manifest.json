@@ -1,0 +1,37 @@
+{
+	"schema": 1,
+	"fixtures": [
+		{
+			"name": "control-data.scm",
+			"expected": "control-data.out",
+			"source_sha256": "0c9308d716ef91966cb0cbb2fd13706560e063d9f08fd22318293d124551b479",
+			"expected_sha256": "2db967575ed8092a48e76ed29e30082e78eadc08f858fc87be07a6859b0d1fe3",
+			"source_bytes": 626,
+			"expected_bytes": 74
+		},
+		{
+			"name": "numeric-programs.scm",
+			"expected": "numeric-programs.out",
+			"source_sha256": "c1a05139e51b29804d67f3485abb49ab063172f555045d362bf8aea577b96467",
+			"expected_sha256": "bee5469f93cb7a41ab6a3171a832629ad4b9eeb193a503021c7e275e60c18bf3",
+			"source_bytes": 677,
+			"expected_bytes": 265
+		},
+		{
+			"name": "portable-programs.scm",
+			"expected": "portable-programs.out",
+			"source_sha256": "10ad798500b9bb208db489908efa8e0609ee451bad0f79c6147ae35ea34733a7",
+			"expected_sha256": "72ecb48a4dd493403866d5b81d3d69d0f88255fbb5cca7bf908443cdef34e5de",
+			"source_bytes": 889,
+			"expected_bytes": 41
+		},
+		{
+			"name": "smoke.scm",
+			"expected": "smoke.out",
+			"source_sha256": "6edbebdb3a742552b8cf9c30b7962362c729a22c20b3c15771fa014970544918",
+			"expected_sha256": "492544c1a4241ba74bf51bed3a4c9f778ad56fad55da3f87863bd45ac66b86a7",
+			"source_bytes": 217,
+			"expected_bytes": 7
+		}
+	]
+}

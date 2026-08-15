@@ -13,7 +13,7 @@
 	"lineBreakBeforeEachGenericRequirement": false,
 	"lineLength": 100,
 	"maximumBlankLines": 1,
-	"multiElementCollectionTrailingCommas": false,
+	"multiElementCollectionTrailingCommas": true,
 	"noAssignmentInExpressions": {
 		"allowedFunctions": []
 	},

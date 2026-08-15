@@ -27,6 +27,10 @@ import Testing
       "(let ((name (symbol->string 'immutable))) (string-set! name 0 #\\x))",
       "symbol->string result"
     )
+    expectIOError("(let ((x `(a b))) (set-car! x 'z))", "comma-free quasiquote pair")
+    expectIOError("(let ((x `((a)))) (set-car! (car x) 'z))", "nested quasiquote pair")
+    expectIOError("(let ((v `#(a))) (vector-set! v 0 'z))", "comma-free quasiquote vector")
+    expectIOError("(let ((x `(a . b))) (set-car! x 'z))", "dotted quasiquote pair")
   }
 
   @Test("symbols preserve standard case and string-created spelling") func symbolConversion() throws
@@ -36,7 +40,7 @@ import Testing
         + "(eq? 'bitBlt (string->symbol \"bitBlt\")) "
         + "(eq? (string->symbol \"bitBlt\") (string->symbol \"bitBlt\")))"
     )
-    #expect(result.written == "(\"martin\" \"bitBlt\" #f #t)")
+    #expect(result.written == "(\"Martin\" \"bitBlt\" #f #t)")
   }
 
   @Test("string-created symbols preserve control-character spellings")
@@ -46,6 +50,19 @@ import Testing
         + "(string=? s (symbol->string (string->symbol s))))"
     )
     #expect(result.written == "#t")
+  }
+
+  @Test("string-created symbols preserve distinct Unicode spellings")
+  func symbolUnicodeSpellingIdentity() throws {
+    let result = try evaluateIO(
+      """
+      (let ((a (string->symbol "é"))
+            (b (string->symbol (string-append "e" (string (integer->char 769))))))
+        (list (string=? (symbol->string a) (symbol->string b))
+              (eq? a b) (eqv? a b) (equal? a b)))
+      """
+    )
+    #expect(result.written == "(#f #f #f #f)")
   }
 
   @Test("character case conversion preserves R5RS character invariants")
@@ -69,6 +86,9 @@ import Testing
              (char-alphabetic? #\\ẞ)
              (char=? #\\ß (char-downcase #\\ẞ))
              (char-ci=? #\\ẞ #\\ß)
+             (char-ci=? #\\µ (char-upcase #\\µ))
+             (char-upper-case? (char-upcase #\\µ))
+             (char-lower-case? (char-downcase #\\µ))
              (char=? #\\İ (integer->char (char->integer (char-downcase #\\İ))))))
       """
     )
@@ -301,6 +321,45 @@ import Testing
     )
   }
 
+  @Test("display recursively leaves nested strings unquoted and characters raw")
+  func nestedDisplay() throws {
+    let result = try evaluateIO(
+      "(call-with-output-string (lambda (p) " + "(display (list \"a\n\" #\\x (vector \"b\")) p)))"
+    )
+    #expect(result.written == "\"(a\n x #(b))\"")
+  }
+
+  @Test("reader completeness distinguishes incomplete dotted lists") func readerCompleteness() {
+    let interpreter = Interpreter { _ in }
+    #expect(!interpreter.isComplete("(a ."))
+    #expect(interpreter.isComplete("(a .)"))
+  }
+
+  @Test("reader completeness probes do not retain parsed objects")
+  func readerCompletenessDoesNotRetainValues() {
+    let interpreter = Interpreter { _ in }
+    let baseline = interpreter.heapStatistics.allocated
+    for _ in 0..<100 { #expect(interpreter.isComplete("(a #(1 2) \"text\")")) }
+    #expect(interpreter.heapStatistics.allocated == baseline)
+  }
+
+  @Test("configured current input serves omitted read operations") func configuredInputPort() throws
+  {
+    let interpreter = Interpreter(output: { _ in }, input: " 1")
+    #expect(try interpreter.evaluate("(read)").written == "1")
+    #expect(try interpreter.evaluate("(read)").written == "#<eof>")
+  }
+
+  @Test("invalid UTF-8 input files report I/O errors") func invalidUTF8InputFile() throws {
+    let path = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "swiftscheme-invalid-utf8-\(UUID().uuidString)"
+    ).path
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    _ = FileManager.default.createFile(atPath: path, contents: Data([0xff, 0xfe]))
+    let quoted = String(reflecting: path)
+    expectIOError("(open-input-file \(quoted))", "invalid UTF-8 input")
+  }
+
   @Test("omitted input ports reject a closed current input port") func closedCurrentInputDefaults()
   {
     for operation in ["read", "read-char", "peek-char", "char-ready?"] {
@@ -397,5 +456,43 @@ import Testing
     _ = try interpreter.evaluate("(load \(quotedPath))")
     #expect(try interpreter.evaluate("loaded-value").written == "41")
     #expect(try interpreter.evaluate("(load \(quotedPath))").written == "#<unspecified>")
+
+    let partialPath = directory.appendingPathComponent("partial.scm").path
+    try "(define partial-value 7) (".write(toFile: partialPath, atomically: true, encoding: .utf8)
+    let quotedPartialPath =
+      "\""
+      + partialPath.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(
+        of: "\"",
+        with: "\\\""
+      ) + "\""
+    do {
+      _ = try interpreter.evaluate("(load \(quotedPartialPath))")
+      #expect(Bool(false), "malformed load unexpectedly succeeded")
+    } catch is SchemeError {}
+    #expect(try interpreter.evaluate("partial-value").written == "7")
+
+    _ = try interpreter.evaluate("(define saved-input (current-input-port))")
+    for expression in [
+      "(call-with-input-file \(quotedPath) (lambda (p) (car 1)))",
+      "(with-input-from-file \(quotedPath) (lambda () (car 1)))",
+    ] {
+      do {
+        _ = try interpreter.evaluate(expression)
+        #expect(Bool(false), "erroring input callback unexpectedly succeeded")
+      } catch is SchemeError {}
+    }
+    #expect(try interpreter.evaluate("(eq? saved-input (current-input-port))").written == "#t")
+
+    _ = try interpreter.evaluate("(define saved-output (current-output-port))")
+    for expression in [
+      "(call-with-output-file \(quotedPath) (lambda (p) (car 1)))",
+      "(with-output-to-file \(quotedPath) (lambda () (car 1)))",
+    ] {
+      do {
+        _ = try interpreter.evaluate(expression)
+        #expect(Bool(false), "erroring output callback unexpectedly succeeded")
+      } catch is SchemeError {}
+    }
+    #expect(try interpreter.evaluate("(eq? saved-output (current-output-port))").written == "#t")
   }
 }
